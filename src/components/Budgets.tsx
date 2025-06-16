@@ -11,7 +11,7 @@ import {
   Toolbar
 } from '@mui/material';
 import { useGlobalState } from '../contexts/GlobalStateContext';
-import { getMonthStartEnd, getRollingMonthlyLimit } from '../utils/budget';
+import { getMonthStartEnd } from '../utils/budget';
 import BudgetProgressBar from './BudgetProgressBar';
 import { BLUE } from '../theme';
 
@@ -67,7 +67,7 @@ const Budgets = () => {
             <BudgetProgressBar
               name={budget.name}
               spent={summary.budgetTotals[budget.name] || 0}
-              limit={getRollingMonthlyLimit(budget.monthlyLimit || 0, summary.budgetYearToDateTotals?.[budget.name] || 0, new Date())}
+              limit={summary.budgetTotals[budget.name] || 0}
               startDate={startDate}
               endDate={endDate}
             />

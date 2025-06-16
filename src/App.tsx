@@ -5,6 +5,7 @@ import Budgets from './components/Budgets';
 import BudgetDetail from './components/BudgetDetail';
 import ReceiptForm from './components/ReceiptForm';
 import TestMode from './components/TestMode';
+import AdminReceiptForm from './components/AdminReceiptForm';
 import styles from './styles/App.module.css';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import AppBar from '@mui/material/AppBar';
@@ -124,6 +125,7 @@ function App() {
               <Route path="/budgets" element={<Budgets />} />
               <Route path="/budgets/:budgetName" element={<BudgetDetail />} />
               <Route path="/submit-receipt" element={<ReceiptForm />} />
+              <Route path="/admin-receipt" element={<AdminReceiptForm />} />
               <Route path="/test-mode" element={<TestMode />} />
             </Routes>
           </main>

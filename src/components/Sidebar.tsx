@@ -10,8 +10,8 @@ const Sidebar = () => {
       <div className={styles.logo}>Receipts</div>
       <ul className={styles.navList}>
         {isDesktop && <li><NavLink to="/dashboard" className={({isActive}) => isActive ? styles.active : ''}>Dashboard</NavLink></li>}
-        <li><NavLink to="/budgets" className={({isActive}) => isActive ? styles.active : ''}>Budgets</NavLink></li>
         <li><NavLink to="/submit-receipt" className={({isActive}) => isActive ? styles.active : ''}>Submit Receipt</NavLink></li>
+        <li><NavLink to="/admin-receipt" className={({isActive}) => isActive ? styles.active : ''}>Admin Receipt Entry</NavLink></li>
         <li><NavLink to="/test-mode" className={({isActive}) => isActive ? styles.active : ''}>Test Mode</NavLink></li>
       </ul>
     </nav>

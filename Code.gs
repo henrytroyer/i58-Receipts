@@ -52,32 +52,32 @@ function updateCategory(data) {
 }
 
 function doPost(e) {
+  Logger.log('doPost started');
   try {
-    console.log('Received POST request');
-    console.log('Post data type:', typeof e.postData.contents);
-    console.log('Post data length:', e.postData.contents.length);
+    Logger.log('Received POST request');
+    Logger.log('Post data type: ' + typeof e.postData.contents);
+    Logger.log('Post data length: ' + (e.postData && e.postData.contents ? e.postData.contents.length : 'no postData'));
     
     let response;
     let data;
     try {
       // Handle form data
-      const formData = e.parameter.data || e.postData.contents;
-      console.log('Form data received:', formData);
+      const formData = e.parameter.data || (e.postData && e.postData.contents);
+      Logger.log('Form data received: ' + formData);
       data = JSON.parse(formData);
-      console.log('Parsed data keys:', Object.keys(data));
+      Logger.log('Parsed data keys: ' + Object.keys(data));
     } catch (parseError) {
-      console.error('Error parsing POST data:', parseError);
+      Logger.log('Error parsing POST data: ' + parseError);
       throw new Error('Invalid JSON data received');
     }
     
     // Only handle receipt submission
     if (!data.action) {
-      // Handle receipt submission
-      console.log('Processing receipt submission');
-      const { amount, date, description, budget, category, pdf, vendor, card } = data;
+      Logger.log('Processing receipt submission');
+      const { amount, date, description, budget, category, pdf, vendor, card, startDate, endDate } = data;
       
       // Log received data (excluding pdf data for brevity)
-      console.log('Received receipt data:', {
+      Logger.log('Received receipt data: ' + JSON.stringify({
         amount,
         date,
         description,
@@ -86,52 +86,55 @@ function doPost(e) {
         hasPdf: !!pdf,
         vendor,
         card
-      });
+      }));
       
-      // Validate required fields
-      if (!amount || !date || !description || !budget || !category || !vendor || !card) {
-        console.error('Missing required fields:', {
+      Logger.log('About to validate required fields');
+      if (!amount || !date || !budget || !category || !vendor) {
+        Logger.log('Missing required fields: ' + JSON.stringify({
           hasAmount: !!amount,
           hasDate: !!date,
-          hasDescription: !!description,
           hasBudget: !!budget,
           hasCategory: !!category,
-          hasVendor: !!vendor,
-          hasCard: !!card
-        });
-        throw new Error('Missing required fields');
+          hasVendor: !!vendor
+        }));
+        throw new Error('Missing required fields: amount, date, budget, category, and vendor are required.');
       }
+      Logger.log('All required fields present');
 
       // Handle PDF if provided
       let pdfUrl = '';
       if (pdf) {
         try {
-          console.log('Processing PDF data...');
+          Logger.log('Processing PDF data...');
           pdfUrl = saveReceiptPDF(pdf, date, amount, budget, category, vendor, card, data.pdfIsNative);
-          console.log('PDF saved successfully, URL:', pdfUrl);
+          Logger.log('PDF saved successfully, URL: ' + pdfUrl);
         } catch (pdfError) {
-          console.error('Error saving PDF:', pdfError);
+          Logger.log('Error saving PDF: ' + pdfError);
           throw new Error('Failed to save PDF: ' + pdfError.message);
         }
+      } else {
+        Logger.log('No PDF provided, skipping PDF processing');
       }
 
-      // Log to sheet
+      // Log to sheet (all fields optional except required ones)
       try {
-        console.log('Logging to sheet...');
+        Logger.log('Logging to sheet...');
         logToSheet({
           date,
           amount,
-          description,
+          description: description || '',
           budget,
           category,
           photoUrl: pdfUrl,
           monthlyExpense: data.monthlyExpense || false,
           vendor,
-          card
+          card: card || '',
+          startDate: startDate || '',
+          endDate: endDate || ''
         });
-        console.log('Successfully logged to sheet');
+        Logger.log('Successfully logged to sheet');
       } catch (sheetError) {
-        console.error('Error logging to sheet:', sheetError);
+        Logger.log('Error logging to sheet: ' + sheetError);
         throw new Error('Failed to log to sheet: ' + sheetError.message);
       }
 
@@ -149,11 +152,11 @@ function doPost(e) {
       };
     }
 
-    console.log('Sending response:', response);
+    Logger.log('Sending response: ' + JSON.stringify(response));
     return ContentService.createTextOutput(JSON.stringify(response))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
-    console.error('Error in doPost:', error);
+    Logger.log('Error in doPost: ' + error + (error && error.stack ? ('\n' + error.stack) : ''));
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
       error: error.message,
@@ -165,12 +168,12 @@ function doPost(e) {
 
 function getOrCreateFolder() {
   try {
-    console.log('Accessing shared drive...');
+    Logger.log('Accessing shared drive...');
     const sharedDrive = DriveApp.getFolderById(SHARED_DRIVE_ID);
-    console.log('Shared drive accessed successfully');
+    Logger.log('Shared drive accessed successfully');
     return sharedDrive;
   } catch (error) {
-    console.error('Error accessing shared drive:', error);
+    Logger.error('Error accessing shared drive:', error);
     throw new Error('Failed to access shared drive: ' + error.message);
   }
 }
@@ -220,7 +223,7 @@ function getOrCreateCategoryFolder(monthFolder, categoryName) {
 
 function saveReceiptPDF(pdfData, date, amount, budget, category, vendor, card, pdfIsNative) {
   try {
-    console.log('Starting PDF save process...');
+    Logger.log('Starting PDF save process...');
     // Format: (category code) (vendor) (yyyy.MM.dd) (amount) (card).pdf
     const formattedDate = Utilities.formatDate(new Date(date), Session.getScriptTimeZone(), 'yyyy.MM.dd');
     const safeVendor = vendor ? vendor.replace(/[^a-zA-Z0-9 _.-]/g, '') : '';
@@ -235,7 +238,7 @@ function saveReceiptPDF(pdfData, date, amount, budget, category, vendor, card, p
       // pdfData is base64-encoded PDF
       const pdfBlob = Utilities.newBlob(Utilities.base64Decode(pdfData), 'application/pdf', filename);
       const finalFile = receiptsFolder.createFile(pdfBlob);
-      console.log('PDF saved directly (native upload)');
+      Logger.log('PDF saved directly (native upload)');
       return finalFile.getUrl();
     }
 
@@ -273,7 +276,7 @@ function saveReceiptPDF(pdfData, date, amount, budget, category, vendor, card, p
       if (!jobData.data || !jobData.data.id) {
         throw new Error('Invalid job creation response: ' + jobResponse.getContentText());
       }
-      console.log('Job created successfully:', jobData.data.id);
+      Logger.log('Job created successfully:', jobData.data.id);
 
       // Wait for the job to complete
       let exportUrl = null;
@@ -291,7 +294,7 @@ function saveReceiptPDF(pdfData, date, amount, budget, category, vendor, card, p
           throw new Error('Failed to check job status: ' + statusResponse.getContentText());
         }
         const statusData = JSON.parse(statusResponse.getContentText());
-        console.log('Job status:', statusData.data.status);
+        Logger.log('Job status:', statusData.data.status);
         if (statusData.data.status === 'finished') {
           const exportTask = statusData.data.tasks.find(task => task.name === 'export-pdf');
           if (exportTask && exportTask.result && exportTask.result.files && exportTask.result.files[0]) {
@@ -310,7 +313,7 @@ function saveReceiptPDF(pdfData, date, amount, budget, category, vendor, card, p
       if (!exportUrl) {
         throw new Error('PDF conversion timed out');
       }
-      console.log('Downloading converted PDF...');
+      Logger.log('Downloading converted PDF...');
       // Download the converted PDF
       const pdfResponse = UrlFetchApp.fetch(exportUrl, {
         muteHttpExceptions: true
@@ -320,37 +323,48 @@ function saveReceiptPDF(pdfData, date, amount, budget, category, vendor, card, p
       }
       const pdfBlob = Utilities.newBlob(pdfResponse.getContent(), 'application/pdf', filename);
       const finalFile = receiptsFolder.createFile(pdfBlob);
-      console.log('PDF saved successfully (converted)');
+      Logger.log('PDF saved successfully (converted)');
       return finalFile.getUrl();
     } catch (processError) {
       throw new Error('Failed to process file: ' + processError.message);
     }
   } catch (error) {
-    console.error('Error in saveReceiptPDF:', error);
+    Logger.error('Error in saveReceiptPDF:', error);
     throw new Error('Failed to save receipt PDF: ' + error.message);
   }
 }
 
 function logToSheet(data) {
   try {
-    console.log('Starting sheet logging process...');
-    console.log('Data to log:', data);
+    Logger.log('Starting sheet logging process...');
+    Logger.log('Data to log:', data);
     
     const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('receipt_log');
     if (!sheet) {
-      console.error('Receipt log sheet not found');
+      Logger.error('Receipt log sheet not found');
       throw new Error('Receipt log sheet not found');
     }
-    console.log('Sheet accessed successfully');
+    Logger.log('Sheet accessed successfully');
 
-    // Ensure the Monthly Expense column exists
+    // Ensure the Monthly Expense, Start Date, and End Date columns exist
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     let monthlyExpenseCol = headers.indexOf('Monthly Expense') + 1;
     if (monthlyExpenseCol === 0) {
-      // Add the column if it doesn't exist
       sheet.insertColumnAfter(headers.length);
       sheet.getRange(1, headers.length + 1).setValue('Monthly Expense');
       monthlyExpenseCol = headers.length + 1;
+    }
+    let startDateCol = headers.indexOf('Start Date') + 1;
+    if (startDateCol === 0) {
+      sheet.insertColumnAfter(headers.length);
+      sheet.getRange(1, headers.length + 1).setValue('Start Date');
+      startDateCol = headers.length + 1;
+    }
+    let endDateCol = headers.indexOf('End Date') + 1;
+    if (endDateCol === 0) {
+      sheet.insertColumnAfter(headers.length);
+      sheet.getRange(1, headers.length + 1).setValue('End Date');
+      endDateCol = headers.length + 1;
     }
 
     const row = [
@@ -363,32 +377,34 @@ function logToSheet(data) {
       new Date(), // Timestamp
       data.monthlyExpense ? 'TRUE' : 'FALSE',
       data.vendor || '',
-      data.card || ''
+      data.card || '',
+      data.startDate || '',
+      data.endDate || ''
     ];
     // If the sheet has more columns, fill in empty values for missing columns
     while (row.length < sheet.getLastColumn()) {
       row.push('');
     }
-    console.log('Row to append:', row);
+    Logger.log('Row to append:', row);
 
     sheet.appendRow(row);
-    console.log('Row appended successfully');
+    Logger.log('Row appended successfully');
   } catch (error) {
-    console.error('Error in logToSheet:', error);
-    console.error('Error stack:', error.stack);
+    Logger.error('Error in logToSheet:', error);
+    Logger.error('Error stack:', error.stack);
     throw new Error('Failed to log to sheet: ' + error.message);
   }
 }
 
 function initializeSheets() {
   try {
-    console.log('Initializing sheets...');
+    Logger.log('Initializing sheets...');
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     
     // Initialize Budgets sheet
     let budgetSheet = spreadsheet.getSheetByName('Budgets');
     if (!budgetSheet) {
-      console.log('Creating Budgets sheet...');
+      Logger.log('Creating Budgets sheet...');
       budgetSheet = spreadsheet.insertSheet('Budgets');
       budgetSheet.getRange('A1:D1').setValues([['Name', 'Code', 'Monthly Limit', 'Active']]);
       // Add a default budget
@@ -398,7 +414,7 @@ function initializeSheets() {
     // Initialize Categories sheet
     let categorySheet = spreadsheet.getSheetByName('Categories');
     if (!categorySheet) {
-      console.log('Creating Categories sheet...');
+      Logger.log('Creating Categories sheet...');
       categorySheet = spreadsheet.insertSheet('Categories');
       categorySheet.getRange('A1:E1').setValues([['Budget Name', 'Name', 'Code', 'Monthly Limit', 'Active']]);
       // Add a default category
@@ -408,37 +424,37 @@ function initializeSheets() {
     // Initialize receipt_log sheet
     let receiptSheet = spreadsheet.getSheetByName('receipt_log');
     if (!receiptSheet) {
-      console.log('Creating receipt_log sheet...');
+      Logger.log('Creating receipt_log sheet...');
       receiptSheet = spreadsheet.insertSheet('receipt_log');
       receiptSheet.getRange('A1:J1').setValues([['Date', 'Amount', 'Description', 'Budget', 'Category', 'Photo URL', 'Timestamp', 'Monthly Expense', 'Vendor', 'Card']]);
     }
 
     return true;
   } catch (error) {
-    console.error('Error initializing sheets:', error);
+    Logger.error('Error initializing sheets:', error);
     throw error;
   }
 }
 
 function getBudgets() {
   try {
-    console.log('Opening spreadsheet with ID:', SPREADSHEET_ID);
+    Logger.log('Opening spreadsheet with ID:', SPREADSHEET_ID);
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    console.log('Getting Budgets sheet...');
+    Logger.log('Getting Budgets sheet...');
     let sheet = spreadsheet.getSheetByName('Budgets');
     
     if (!sheet) {
-      console.log('Budgets sheet not found, initializing sheets...');
+      Logger.log('Budgets sheet not found, initializing sheets...');
       initializeSheets();
       sheet = spreadsheet.getSheetByName('Budgets');
     }
     
-    console.log('Getting data range...');
+    Logger.log('Getting data range...');
     const data = sheet.getDataRange().getValues();
-    console.log('Raw data from sheet:', data);
+    Logger.log('Raw data from sheet:', data);
     
     const headers = data.shift(); // Remove header row
-    console.log('Headers:', headers);
+    Logger.log('Headers:', headers);
     
     // Transform the data into the expected format
     const budgets = data.map(row => ({
@@ -448,33 +464,33 @@ function getBudgets() {
       active: row[3] === true || row[3] === 'TRUE' || row[3] === 'true'
     }));
 
-    console.log('Processed budgets:', budgets);
+    Logger.log('Processed budgets:', budgets);
     return budgets;
   } catch (error) {
-    console.error('Error in getBudgets:', error);
+    Logger.error('Error in getBudgets:', error);
     throw error;
   }
 }
 
 function getCategories() {
   try {
-    console.log('Opening spreadsheet with ID:', SPREADSHEET_ID);
+    Logger.log('Opening spreadsheet with ID:', SPREADSHEET_ID);
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    console.log('Getting Categories sheet...');
+    Logger.log('Getting Categories sheet...');
     let sheet = spreadsheet.getSheetByName('Categories');
     
     if (!sheet) {
-      console.log('Categories sheet not found, initializing sheets...');
+      Logger.log('Categories sheet not found, initializing sheets...');
       initializeSheets();
       sheet = spreadsheet.getSheetByName('Categories');
     }
     
-    console.log('Getting data range...');
+    Logger.log('Getting data range...');
     const data = sheet.getDataRange().getValues();
-    console.log('Raw data from sheet:', data);
+    Logger.log('Raw data from sheet:', data);
     
     const headers = data.shift(); // Remove header row
-    console.log('Headers:', headers);
+    Logger.log('Headers:', headers);
     
     // Transform the data into the expected format
     const categories = data.map(row => ({
@@ -485,10 +501,10 @@ function getCategories() {
       active: row[4] === true || row[4] === 'TRUE' || row[4] === 'true'
     }));
 
-    console.log('Processed categories:', categories);
+    Logger.log('Processed categories:', categories);
     return categories;
   } catch (error) {
-    console.error('Error in getCategories:', error);
+    Logger.error('Error in getCategories:', error);
     throw error;
   }
 }
@@ -507,19 +523,20 @@ function getCards() {
 
 function getBudgetProgress(e) {
   try {
+    Logger.log('Starting getBudgetProgress...');
     const budget = e.parameter.budget;
     const category = e.parameter.category;
     
     if (!budget || !category) {
       throw new Error('Budget and category are required');
     }
+    Logger.log('Processing for budget: ' + budget + ' category: ' + category);
 
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const receiptSheet = spreadsheet.getSheetByName('receipt_log');
-    const budgetSheet = spreadsheet.getSheetByName('Budgets');
-    const categorySheet = spreadsheet.getSheetByName('Categories');
+    const snapshotSheet = spreadsheet.getSheetByName('MonthlyBudgetSnapshot');
 
-    if (!receiptSheet || !budgetSheet || !categorySheet) {
+    if (!receiptSheet || !snapshotSheet) {
       throw new Error('Required sheets not found');
     }
 
@@ -527,6 +544,35 @@ function getBudgetProgress(e) {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+    Logger.log('Processing snapshot for month: ' + monthStr);
+
+    // Get snapshot data
+    const snapshotData = snapshotSheet.getDataRange().getValues();
+    // snapData.shift(); // remove header (commented out because there is no header row)
+    let monthlyLimit = 0;
+    let categoryLimit = 0;
+
+    // Find limits from snapshot
+    Logger.log('Searching for limits in snapshot...');
+    const currentMonthData = snapshotData.filter(row => {
+      // Convert the cell value to a date (if it's not already)
+      const cellDate = new Date(row[0]);
+      // Format it to 'yyyy-MM' for comparison
+      const cellMonthStr = Utilities.formatDate(cellDate, Session.getScriptTimeZone(), 'yyyy-MM');
+      return cellMonthStr === monthStr;
+    });
+    if (currentMonthData.length > 0) {
+      const row = currentMonthData[0];
+      if (row[1] === budget) {
+        monthlyLimit = Number(row[2]) || 0;
+        Logger.log('Found monthly limit: ' + monthlyLimit);
+      } else if (row[2] === category) {
+        categoryLimit = Number(row[3]) || 0;
+        Logger.log('Found category limit: ' + categoryLimit);
+      }
+    }
+    Logger.log('Final limits - Monthly: ' + monthlyLimit + ' Category: ' + categoryLimit);
 
     // Get all receipts for the current month
     const receipts = receiptSheet.getDataRange().getValues();
@@ -550,18 +596,6 @@ function getBudgetProgress(e) {
       return sum;
     }, 0);
 
-    // Get budget limit
-    const budgets = budgetSheet.getDataRange().getValues();
-    const budgetHeaders = budgets.shift();
-    const budgetRow = budgets.find(row => row[0] === budget);
-    const monthlyLimit = budgetRow ? Number(budgetRow[2]) : 0;
-
-    // Get category limit
-    const categories = categorySheet.getDataRange().getValues();
-    const categoryHeaders = categories.shift();
-    const categoryRow = categories.find(row => row[0] === budget && row[1] === category);
-    const categoryLimit = categoryRow ? Number(categoryRow[3]) : 0;
-
     return {
       success: true,
       data: {
@@ -572,7 +606,7 @@ function getBudgetProgress(e) {
       }
     };
   } catch (error) {
-    console.error('Error in getBudgetProgress:', error);
+    Logger.error('Error in getBudgetProgress: ' + error.message);
     return {
       success: false,
       error: error.message
@@ -588,8 +622,8 @@ function getBudgetYearStart(now) {
   // Special case: 2025, fiscal year starts July 1
   if (year === 2025) {
     if (month < 7) {
-      return null; // Not started yet
-    }
+    return null; // Not started yet
+  }
     return new Date(2025, 6, 1); // July 1, 2025 (month 6 is July)
   }
 
@@ -615,52 +649,109 @@ function parseDateParam(e) {
   return new Date();
 }
 
-function getGlobalSummary(e) {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('receipt_log');
-  const data = sheet.getDataRange().getValues();
-  data.shift(); // remove header
+function getGlobalSummary(now) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+  const receiptSheet = ss.getSheetByName('receipt_log');
+  
+  if (!snapSheet || !receiptSheet) {
+    throw new Error('Required sheets not found');
+  }
 
-  const now = parseDateParam(e);
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const budgetYearStart = getBudgetYearStart(now);
+  const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+  Logger.log('Getting global summary for month: ' + monthStr);
+  
+  // Get data from MonthlyBudgetSnapshot
+  const snapData = snapSheet.getDataRange().getValues();
+  // snapData.shift(); // remove header (commented out because there is no header row)
+  
+  // Get current month's data
+  const currentMonthData = snapData.filter(row => {
+    // Convert the cell value to a date (if it's not already)
+    const cellDate = new Date(row[0]);
+    // Format it to 'yyyy-MM' for comparison
+    const cellMonthStr = Utilities.formatDate(cellDate, Session.getScriptTimeZone(), 'yyyy-MM');
+    return cellMonthStr === monthStr;
+  });
+  
+  // Calculate totals from snapshot
+  const budgetLimits = {};
+  let totalBudgeted = 0;
+  
+  currentMonthData.forEach(row => {
+    const budget = String(row[1]).trim();
+    const category = String(row[2]).trim();
+    const amount = Number(String(row[3]).replace(/[€,]/g, '').trim()) || 0;
 
-  let totalSpent = 0;
-  let receiptsCount = 0;
-  const budgetTotals = {};
-  const categoryTotals = {};
-  const budgetCategoryTotals = {};
-  const budgetYearToDateTotals = {};
-  const categoryYearToDateTotals = {};
-
-  data.forEach(row => {
-    const date = new Date(row[0]);
-    const amount = Number(row[1]);
-    const budget = row[3];
-    const category = row[4];
-
-    // This month
-    if (date >= startOfMonth && date <= now) {
-      totalSpent += amount;
-      receiptsCount += 1;
-      budgetTotals[budget] = (budgetTotals[budget] || 0) + amount;
-      // Only sum category totals per budget
-      if (!budgetCategoryTotals[budget]) budgetCategoryTotals[budget] = {};
-      if (category) {
-        budgetCategoryTotals[budget][category] = (budgetCategoryTotals[budget][category] || 0) + amount;
-      }
-      // For legacy: categoryTotals is now sum across all budgets (for backward compatibility)
-      if (category) {
-        categoryTotals[category] = (categoryTotals[category] || 0) + amount;
-      }
+    if (!budgetLimits[budget]) {
+      budgetLimits[budget] = { total: 0, categories: {} };
     }
 
-    // Year-to-date (budget year)
-    if (budgetYearStart && date >= budgetYearStart && date <= now) {
-      budgetYearToDateTotals[budget] = (budgetYearToDateTotals[budget] || 0) + amount;
-      if (!categoryYearToDateTotals[budget]) categoryYearToDateTotals[budget] = {};
-      if (category) {
-        categoryYearToDateTotals[budget][category] = (categoryYearToDateTotals[budget][category] || 0) + amount;
+    if (!category) { // Budget level (total)
+      budgetLimits[budget].total = amount;
+      totalBudgeted += amount;
+    } else { // Category level
+      budgetLimits[budget].categories[category] = amount;
+    }
+  });
+
+  // Get actual spending from receipt_log
+  const receipts = receiptSheet.getDataRange().getValues();
+  receipts.shift(); // remove header
+  
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  
+  let totalSpent = 0;
+  let receiptsCount = 0;
+  const spending = {};
+  
+  receipts.forEach(row => {
+    const date = new Date(row[0]);
+    const amount = Number(row[1]) || 0;
+    const budget = row[3];
+    const category = row[4];
+    const monthlyExpense = String(row[7]).toUpperCase() === 'TRUE';
+    const vendor = row[8];
+    const card = row[9];
+    const startDateStr = row[10] || '';
+    const endDateStr = row[11] || '';
+    let include = false;
+    if (monthlyExpense) {
+      // Parse start and end dates
+      const startDate = startDateStr ? new Date(startDateStr) : date;
+      const endDate = endDateStr ? new Date(endDateStr) : null;
+      // Get the first day of the current month
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      // Get the last day of the current month
+      const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      // If the recurring transaction covers the current month
+      if (startDate <= currentMonthEnd && (!endDate || endDate >= currentMonthStart)) {
+        include = true;
       }
+    } else {
+      // Only include if the transaction date is in the current month
+      if (
+        date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth()
+      ) {
+        include = true;
+      }
+    }
+    if (include) {
+      totalSpent += amount;
+      receiptsCount++;
+      if (!spending[budget]) {
+        spending[budget] = {
+          total: 0,
+          categories: {}
+        };
+      }
+      spending[budget].total += amount;
+      if (!spending[budget].categories[category]) {
+        spending[budget].categories[category] = 0;
+      }
+      spending[budget].categories[category] += amount;
     }
   });
 
@@ -669,23 +760,47 @@ function getGlobalSummary(e) {
     data: {
       totalSpent,
       receiptsCount,
-      budgetTotals,
-      categoryTotals,
-      budgetCategoryTotals,
-      budgetYearToDateTotals,
-      categoryYearToDateTotals
+      budgetLimits,
+      spending,
+      totalBudgeted,
+      remaining: totalBudgeted - totalSpent
     }
   };
 }
 
 function getBudgetSummary(budgetName, e) {
+  Logger.log('Starting getBudgetSummary for budget: ' + budgetName);
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('receipt_log');
+  const snapshotSheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('MonthlyBudgetSnapshot');
   const data = sheet.getDataRange().getValues();
   data.shift(); // remove header
 
   const now = parseDateParam(e);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const budgetYearStart = getBudgetYearStart(now);
+  const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+  Logger.log('Processing snapshot for month: ' + monthStr);
+
+  // Get snapshot data for this budget
+  const snapshotData = snapshotSheet.getDataRange().getValues();
+  // snapshotData.shift(); // remove header (commented out because there is no header row)
+  const categoryLimits = {};
+  let totalBudgeted = 0;
+
+  // Process snapshot data
+  Logger.log('Processing snapshot data for budget: ' + budgetName);
+  snapshotData.forEach(row => {
+    if (row[0] === monthStr && row[1] === budgetName) {
+      if (row[2] === '') { // Budget level
+        totalBudgeted = Number(row[3]) || 0;
+        Logger.log('Found total budgeted amount: ' + totalBudgeted);
+      } else { // Category level
+        categoryLimits[row[2]] = Number(row[3]) || 0;
+        Logger.log('Found category limit: ' + row[2] + ' = ' + (Number(row[3]) || 0));
+      }
+    }
+  });
+  Logger.log('Final category limits for budget ' + budgetName + ': ' + JSON.stringify(categoryLimits));
 
   let totalSpent = 0;
   let receiptsCount = 0;
@@ -719,7 +834,9 @@ function getBudgetSummary(budgetName, e) {
       totalSpent,
       receiptsCount,
       categoryTotals,
-      categoryYearToDateTotals
+      categoryYearToDateTotals,
+      totalBudgeted,
+      categoryLimits
     }
   };
 }
@@ -770,82 +887,55 @@ function getYearlySummary() {
 }
 
 function doGet(e) {
+  Logger.log('Received request:', e.parameter);
+  let response;
+  
   try {
-    if (!e) {
-      console.log('No event object provided');
-      return ContentService.createTextOutput(JSON.stringify({
-        success: true,
-        message: 'App is running',
-        version: '1.0'
-      }))
-      .setMimeType(ContentService.MimeType.JSON);
+    switch (e.parameter.action) {
+      case 'getGlobalSummary':
+        Logger.log('Getting global summary');
+        const date = e.parameter.date ? new Date(e.parameter.date) : new Date();
+        response = getGlobalSummary(date);
+        break;
+      case 'getBudgetSummary':
+        Logger.log('Getting budget summary for:', e.parameter.budget);
+        const budgetDate = e.parameter.date ? new Date(e.parameter.date) : new Date();
+        response = getBudgetSummary(e.parameter.budget, budgetDate);
+        break;
+      case 'getBudgets':
+        Logger.log('Getting budgets');
+        response = getBudgets();
+        break;
+      case 'getCategories':
+        Logger.log('Getting categories');
+        response = getCategories();
+        break;
+      case 'getCards':
+        response = getCards();
+        break;
+      case 'getBudgetProgress':
+        Logger.log('Getting budget progress');
+        response = getBudgetProgress(e);
+        break;
+      case 'getYearlySummary':
+        Logger.log('Getting yearly summary');
+        response = getYearlySummary();
+        break;
+      default:
+        Logger.log('Invalid action:', e.parameter.action);
+        throw new Error('Invalid action');
     }
-
-    console.log('doGet called with parameters:', e.parameter);
-    if (!e.parameter || !e.parameter.action) {
-      console.log('No parameters provided');
-      return ContentService.createTextOutput(JSON.stringify({
-        success: true,
-        message: 'App is running',
-        version: '1.0'
-      }))
-      .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    let response;
-    try {
-      // Initialize sheets if needed
-      initializeSheets();
-
-      switch (e.parameter.action) {
-        case 'getBudgets':
-          console.log('Getting budgets');
-          response = getBudgets();
-          break;
-        case 'getCategories':
-          console.log('Getting categories');
-          response = getCategories();
-          break;
-        case 'getCards':
-          response = getCards();
-          break;
-        case 'getBudgetProgress':
-          console.log('Getting budget progress');
-          response = getBudgetProgress(e);
-          break;
-        case 'getGlobalSummary':
-          console.log('Getting global summary');
-          response = getGlobalSummary(e);
-          break;
-        case 'getBudgetSummary':
-          if (!e.parameter.budget) {
-            throw new Error('Missing budget parameter');
-          }
-          console.log('Getting budget summary for', e.parameter.budget);
-          response = getBudgetSummary(e.parameter.budget, e);
-          break;
-        case 'getYearlySummary':
-          console.log('Getting yearly summary');
-          response = getYearlySummary();
-          break;
-        default:
-          console.log('Invalid action:', e.parameter.action);
-          throw new Error('Invalid action');
-      }
-    } catch (dataError) {
-      console.error('Error processing data:', dataError);
-      throw new Error(`Error processing ${e.parameter.action}: ${dataError.message}`);
-    }
-
-    return ContentService.createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON);
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      data: response
+    })).setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
-    console.error('Error in doGet:', error);
+    Logger.log('Error:', error);
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
-      error: error.message
-    }))
-    .setMimeType(ContentService.MimeType.JSON);
+      error: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
@@ -945,4 +1035,73 @@ function processMonthlyExpenses() {
     }
     sheet.appendRow(newRow);
   });
-} 
+}
+
+// === Monthly Budget Snapshot Functions ===
+function snapshotMonthlyBudgets() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const catSheet = ss.getSheetByName('Categories');
+  const budSheet = ss.getSheetByName('Budgets');
+  let snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+  if (!snapSheet) {
+    snapSheet = ss.insertSheet('MonthlyBudgetSnapshot');
+    snapSheet.hideSheet();
+    snapSheet.appendRow(['Month', 'Budget', 'Category', 'Limit']);
+  }
+  const now = new Date();
+  const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+  const catData = catSheet.getDataRange().getValues();
+  catData.shift(); // remove header
+  catData.forEach(row => {
+    const budget = row[0];
+    const category = row[1];
+    const limit = Number(row[3]) || 0;
+    snapSheet.appendRow([monthStr, budget, category, limit]);
+  });
+  // Optionally snapshot budget-level limits too
+  const budData = budSheet.getDataRange().getValues();
+  budData.shift();
+  budData.forEach(row => {
+    const budget = row[0];
+    const limit = Number(row[2]) || 0;
+    snapSheet.appendRow([monthStr, budget, '', limit]);
+  });
+}
+
+function getMonthlyCategoryLimit(budget, category, now) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+  if (!snapSheet) return null;
+  
+  // Ensure now is a Date object
+  const date = now instanceof Date ? now : new Date(now);
+  const monthStr = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM');
+  
+  Logger.log('Getting monthly category limit for budget: ' + budget + ' category: ' + category + ' month: ' + monthStr);
+  
+  const data = snapSheet.getDataRange().getValues();
+  // data.shift(); // remove header (commented out because there is no header row)
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    if (row[0] === monthStr && row[1] === budget && row[2] === category) {
+      const limit = Number(row[3]) || 0;
+      Logger.log('Found category limit: ' + limit);
+      return limit;
+    }
+  }
+  Logger.log('No category limit found');
+  return null;
+}
+
+// OLD VERSION - NO LONGER USED
+// function getMonthlyBudgetLimit(budgetName, now) {
+//   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Budgets');
+//   const data = sheet.getDataRange().getValues();
+//   const headers = data.shift();
+//   const budgetRow = data.find(row => row[0] === budgetName);
+//   if (budgetRow) {
+//     const monthlyLimit = Number(budgetRow[2]);
+//     return monthlyLimit;
+//   }
+//   return 0;
+// } 

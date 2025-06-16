@@ -16,14 +16,29 @@ interface ErrorState {
   summary: string | null;
 }
 
+interface BudgetData {
+  total: number;
+  categories: Record<string, number>;
+}
+
 interface Summary {
-  totalSpent: number;
-  receiptsCount: number;
-  budgetTotals: Record<string, number>;
-  categoryTotals: Record<string, number>;
-  budgetCategoryTotals?: Record<string, Record<string, number>>;
-  budgetYearToDateTotals?: Record<string, number>;
-  categoryYearToDateTotals?: Record<string, Record<string, number>>;
+  success: boolean;
+  data: {
+    totalSpent: number;
+    receiptsCount: number;
+    budgetLimits: Record<string, {
+      total: number;
+      categories: Record<string, number>;
+    }>;
+    spending: Record<string, {
+      total: number;
+      categories: Record<string, number>;
+    }>;
+    totalBudgeted: number;
+    remaining: number;
+    budgetYearToDateTotals?: Record<string, number>;
+    categoryYearToDateTotals?: Record<string, number>;
+  };
 }
 
 interface GlobalState {
@@ -65,6 +80,18 @@ function globalStateReducer(state: GlobalState, action: any): GlobalState {
     case 'SET_TEST_DATE':
       localStorage.setItem('testDate', action.payload || '');
       return { ...state, testDate: action.payload };
+    case 'SET_BUDGETS':
+      return { ...state, budgets: action.payload };
+    case 'SET_CATEGORIES':
+      return { ...state, categories: action.payload };
+    case 'SET_CARDS':
+      return { ...state, cards: action.payload };
+    case 'SET_LOADING':
+      return { ...state, loading: { ...state.loading, ...action.payload } };
+    case 'SET_ERROR':
+      return { ...state, error: { ...state.error, ...action.payload } };
+    case 'SET_SUMMARY':
+      return { ...state, summary: action.payload };
     default:
       return state;
   }
@@ -90,7 +117,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
       try {
         // Budgets
         try {
-          const budgetsResponse = await api.get('', { params: { action: 'getBudgets' } });
+          const budgetsResponse = await api.get('', { params: { action: 'getBudgets', ...(state.testDate ? { date: state.testDate } : {}) } });
           console.log('budgetsResponse', budgetsResponse.data);
           dispatch({ type: 'SET_BUDGETS', payload: budgetsResponse.data.data || budgetsResponse.data });
           setError({ budgets: null });
@@ -102,7 +129,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
 
         // Categories
         try {
-          const categoriesResponse = await api.get('', { params: { action: 'getCategories' } });
+          const categoriesResponse = await api.get('', { params: { action: 'getCategories', ...(state.testDate ? { date: state.testDate } : {}) } });
           console.log('categoriesResponse', categoriesResponse.data);
           dispatch({ type: 'SET_CATEGORIES', payload: categoriesResponse.data.data || categoriesResponse.data });
           setError({ categories: null });
@@ -114,7 +141,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
 
         // Cards
         try {
-          const cardsResponse = await api.get('', { params: { action: 'getCards' } });
+          const cardsResponse = await api.get('', { params: { action: 'getCards', ...(state.testDate ? { date: state.testDate } : {}) } });
           console.log('cardsResponse', cardsResponse.data);
           dispatch({ type: 'SET_CARDS', payload: cardsResponse.data.data || cardsResponse.data });
           setError({ cards: null });
@@ -126,7 +153,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
 
         // Summary
         try {
-          const summaryResponse = await api.get('', { params: { action: 'getGlobalSummary' } });
+          const summaryResponse = await api.get('', { params: { action: 'getGlobalSummary', ...(state.testDate ? { date: state.testDate } : {}) } });
           console.log('summaryResponse', summaryResponse.data);
           dispatch({ type: 'SET_SUMMARY', payload: summaryResponse.data.data || summaryResponse.data });
           setError({ summary: null });
@@ -141,7 +168,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
       }
     };
     fetchData();
-  }, [dispatch]);
+  }, [dispatch, state.testDate]);
 
   return (
     <GlobalStateContext.Provider value={{ ...state, dispatch }}>

@@ -601,39 +601,94 @@ function parseDateParam(e) {
 }
 
 function getGlobalSummary(e) {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('receipt_log');
-  const data = sheet.getDataRange().getValues();
-  data.shift(); // remove header
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+    const receiptSheet = ss.getSheetByName('receipt_log');
+    
+    if (!snapSheet || !receiptSheet) {
+      throw new Error('Required sheets not found');
+    }
 
   const now = parseDateParam(e);
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const budgetYearStart = getBudgetYearStart(now);
-
-  let totalSpent = 0;
-  let receiptsCount = 0;
+    const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+    
+    // Get data from MonthlyBudgetSnapshot
+    const snapData = snapSheet.getDataRange().getValues();
+    snapData.shift(); // remove header
+    
+    // Get current month's data
+    const currentMonthData = snapData.filter(row => row[0] === monthStr);
+    
+    // Calculate totals from snapshot
   const budgetTotals = {};
   const categoryTotals = {};
-  const budgetYearToDateTotals = {};
-  const categoryYearToDateTotals = {};
+  const budgetCategoryTotals = {};
+    let totalBudgeted = 0;
+    const budgetLimits = {};
+    
+    currentMonthData.forEach(row => {
+      const budget = row[1];
+      const category = row[2];
+      const amount = parseFloat(row[3].toString().replace(/[^0-9.-]+/g, '')) || 0;
+      
+      if (category === 'TOTAL') {
+        budgetTotals[budget] = amount;
+        totalBudgeted += amount;
+        budgetLimits[budget] = amount;
+      } else {
+        if (!budgetCategoryTotals[budget]) {
+          budgetCategoryTotals[budget] = {};
+        }
+        budgetCategoryTotals[budget][category] = amount;
+        
+        if (!categoryTotals[category]) {
+          categoryTotals[category] = 0;
+        }
+        categoryTotals[category] += amount;
+      }
+    });
 
-  data.forEach(row => {
+    // Get actual spending from receipt_log
+    const receipts = receiptSheet.getDataRange().getValues();
+    receipts.shift(); // remove header
+    
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    let totalSpent = 0;
+    let receiptsCount = 0;
+    const actualBudgetTotals = {};
+    const actualCategoryTotals = {};
+    const actualBudgetCategoryTotals = {};
+    
+    receipts.forEach(row => {
     const date = new Date(row[0]);
-    const amount = Number(row[1]);
+      if (date >= startOfMonth && date <= endOfMonth) {
+        const amount = Number(row[1]) || 0;
     const budget = row[3];
     const category = row[4];
 
-    // This month
-    if (date >= startOfMonth && date <= now) {
       totalSpent += amount;
-      receiptsCount += 1;
-      budgetTotals[budget] = (budgetTotals[budget] || 0) + amount;
-      categoryTotals[category] = (categoryTotals[category] || 0) + amount;
-    }
-
-    // Year-to-date (budget year)
-    if (budgetYearStart && date >= budgetYearStart && date <= now) {
-      budgetYearToDateTotals[budget] = (budgetYearToDateTotals[budget] || 0) + amount;
-      categoryYearToDateTotals[category] = (categoryYearToDateTotals[category] || 0) + amount;
+        receiptsCount++;
+        
+        if (!actualBudgetTotals[budget]) {
+          actualBudgetTotals[budget] = 0;
+        }
+        actualBudgetTotals[budget] += amount;
+        
+        if (!actualCategoryTotals[category]) {
+          actualCategoryTotals[category] = 0;
+        }
+        actualCategoryTotals[category] += amount;
+        
+        if (!actualBudgetCategoryTotals[budget]) {
+          actualBudgetCategoryTotals[budget] = {};
+        }
+        if (!actualBudgetCategoryTotals[budget][category]) {
+          actualBudgetCategoryTotals[budget][category] = 0;
+        }
+        actualBudgetCategoryTotals[budget][category] += amount;
     }
   });
 
@@ -644,52 +699,161 @@ function getGlobalSummary(e) {
       receiptsCount,
       budgetTotals,
       categoryTotals,
-      budgetYearToDateTotals,
-      categoryYearToDateTotals
+      budgetCategoryTotals,
+        actualBudgetTotals,
+        actualCategoryTotals,
+        actualBudgetCategoryTotals,
+        totalBudgeted,
+        remaining: totalBudgeted - totalSpent,
+        budgetLimits
     }
   };
+  } catch (error) {
+    console.error('Error in getGlobalSummary:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
 }
 
 function getBudgetSummary(budgetName, e) {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('receipt_log');
-  const data = sheet.getDataRange().getValues();
-  data.shift(); // remove header
+  try {
+    if (!budgetName) {
+      console.error('No budget name provided');
+      throw new Error('Budget name is required');
+    }
+    
+    console.log('Getting budget summary for:', budgetName);
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+    const receiptSheet = ss.getSheetByName('receipt_log');
+    
+    if (!snapSheet || !receiptSheet) {
+      console.error('Required sheets not found');
+      throw new Error('Required sheets not found');
+    }
 
   const now = parseDateParam(e);
+    const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+    console.log('Looking for month:', monthStr);
+    
+    // Get data from MonthlyBudgetSnapshot
+    const snapData = snapSheet.getDataRange().getValues();
+    console.log('Raw snapshot data:', snapData);
+    snapData.shift(); // remove header
+    
+    // Get current month's data for this budget
+    const budgetData = snapData.filter(row => {
+      const rowDate = new Date(row[0]);
+      const rowMonthStr = Utilities.formatDate(rowDate, Session.getScriptTimeZone(), 'yyyy-MM');
+      return rowMonthStr === monthStr && row[1] === budgetName;
+    });
+    console.log('Filtered budget data:', budgetData);
+
+    // Calculate totals from snapshot
+    const categoryTotals = {};
+    const categoryLimits = {};
+    let totalBudgeted = 0;
+    
+    budgetData.forEach(row => {
+      const category = row[2];
+      const amount = parseFloat(row[3].toString().replace(/[^0-9.-]+/g, '')) || 0;
+      console.log('Processing row:', { category, amount });
+      
+      if (category === 'TOTAL') {
+        totalBudgeted = amount;
+        console.log('Found total budget:', totalBudgeted);
+      } else {
+        categoryTotals[category] = amount;
+        categoryLimits[category] = amount;
+      }
+    });
+    console.log('Category totals:', categoryTotals);
+    console.log('Category limits:', categoryLimits);
+
+    // Get actual spending from receipt_log
+    const receipts = receiptSheet.getDataRange().getValues();
+    receipts.shift(); // remove header
+    
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const budgetYearStart = getBudgetYearStart(now);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
   let totalSpent = 0;
   let receiptsCount = 0;
-  const categoryTotals = {};
-  const categoryYearToDateTotals = {};
+    const actualCategoryTotals = {};
 
-  data.forEach(row => {
+    receipts.forEach(row => {
     const date = new Date(row[0]);
-    const amount = Number(row[1]);
-    const budget = row[3];
+      if (row[3] === budgetName && date >= startOfMonth && date <= endOfMonth) {
+        const amount = Number(row[1]) || 0;
     const category = row[4];
 
-    if (budget === budgetName && date >= startOfMonth && date <= now) {
       totalSpent += amount;
-      receiptsCount += 1;
-      categoryTotals[category] = (categoryTotals[category] || 0) + amount;
+        receiptsCount++;
+        
+        if (!actualCategoryTotals[category]) {
+          actualCategoryTotals[category] = 0;
+      }
+        actualCategoryTotals[category] += amount;
     }
+    });
+    console.log('Actual spending:', {
+      totalSpent,
+      receiptsCount,
+      actualCategoryTotals
+    });
 
-    if (budget === budgetName && budgetYearStart && date >= budgetYearStart && date <= now) {
-      categoryYearToDateTotals[category] = (categoryYearToDateTotals[category] || 0) + amount;
-    }
-  });
-
-  return {
+    const response = {
     success: true,
     data: {
       totalSpent,
       receiptsCount,
       categoryTotals,
-      categoryYearToDateTotals
+        actualCategoryTotals,
+        totalBudgeted,
+        remaining: totalBudgeted - totalSpent,
+        categoryLimits
     }
   };
+    console.log('Final response:', response);
+    return response;
+  } catch (error) {
+    console.error('Error in getBudgetSummary:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+function getTotalBudgetedFromSnapshot(now) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+  if (!snapSheet) return 0;
+  const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+  const data = snapSheet.getDataRange().getValues();
+  data.shift();
+  let total = 0;
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    if (row[0] === monthStr && !row[2]) { // Budget-level limit
+      total += Number(row[3]) || 0;
+    }
+  }
+  return total;
+}
+
+function getMonthlyBudgetLimit(budgetName, now) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Budgets');
+  const data = sheet.getDataRange().getValues();
+  const headers = data.shift();
+  const budgetRow = data.find(row => row[0] === budgetName);
+  if (budgetRow) {
+    const monthlyLimit = Number(budgetRow[2]);
+    return monthlyLimit;
+  }
+  return 0;
 }
 
 function getYearlySummary() {
@@ -738,41 +902,36 @@ function getYearlySummary() {
 }
 
 function doGet(e) {
-  try {
+  // Helper function to create CORS-enabled response
+  const createCorsResponse = (content, mimeType) => {
+    const output = ContentService.createTextOutput(content);
+    output.setMimeType(mimeType);
+    return output;
+  };
+
     // Handle preflight requests
     if (e.parameter && e.parameter.action === 'OPTIONS') {
-      return ContentService.createTextOutput('')
-        .setMimeType(ContentService.MimeType.TEXT)
-        .setHeader('Access-Control-Allow-Origin', '*')
-        .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    return createCorsResponse('', ContentService.MimeType.TEXT);
     }
 
+  try {
     if (!e) {
       console.log('No event object provided');
-      return ContentService.createTextOutput(JSON.stringify({
+      return createCorsResponse(JSON.stringify({
         success: true,
         message: 'App is running',
         version: '1.0'
-      }))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeader('Access-Control-Allow-Origin', '*')
-      .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-      .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      }), ContentService.MimeType.JSON);
     }
 
     console.log('doGet called with parameters:', e.parameter);
     if (!e.parameter || !e.parameter.action) {
       console.log('No parameters provided');
-      return ContentService.createTextOutput(JSON.stringify({
+      return createCorsResponse(JSON.stringify({
         success: true,
         message: 'App is running',
         version: '1.0'
-      }))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeader('Access-Control-Allow-Origin', '*')
-      .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-      .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      }), ContentService.MimeType.JSON);
     }
 
     let response;
@@ -820,20 +979,170 @@ function doGet(e) {
       throw new Error(`Error processing ${e.parameter.action}: ${dataError.message}`);
     }
 
-    return ContentService.createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeader('Access-Control-Allow-Origin', '*')
-      .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-      .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    return createCorsResponse(JSON.stringify(response), ContentService.MimeType.JSON);
   } catch (error) {
     console.error('Error in doGet:', error);
-    return ContentService.createTextOutput(JSON.stringify({
+    return createCorsResponse(JSON.stringify({
       success: false,
       error: error.message
-    }))
-    .setMimeType(ContentService.MimeType.JSON)
-    .setHeader('Access-Control-Allow-Origin', '*')
-    .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }), ContentService.MimeType.JSON);
   }
+}
+
+// === Monthly Budget Snapshot Functions ===
+function snapshotMonthlyBudgets() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const catSheet = ss.getSheetByName('Categories');
+  const budSheet = ss.getSheetByName('Budgets');
+  const receiptSheet = ss.getSheetByName('receipt_log');
+  let snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+  
+  // Initialize sheet if it doesn't exist
+  if (!snapSheet) {
+    snapSheet = ss.insertSheet('MonthlyBudgetSnapshot');
+    snapSheet.hideSheet();
+    snapSheet.appendRow(['Month', 'Budget', 'Category', 'Limit']);
+  } else {
+    // Clear the entire sheet except header
+    const lastRow = snapSheet.getLastRow();
+    if (lastRow > 1) {
+      snapSheet.getRange(2, 1, lastRow - 1, 4).clear();
+    }
+  }
+
+  const now = new Date();
+  const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+  
+  // Check if we're in the first month of the fiscal year
+  // For 2025: July (month 6) is first month
+  // For all other years: January (month 0) is first month
+  const isFirstMonth = (now.getFullYear() === 2025 && now.getMonth() === 6) || 
+                      (now.getFullYear() !== 2025 && now.getMonth() === 0);
+  
+  // Check if we're before fiscal year start (before July 2025)
+  const isPreFiscalYear = now.getFullYear() === 2025 && now.getMonth() < 6;
+  
+  // Get all receipts for the current month
+  const receipts = receiptSheet.getDataRange().getValues();
+  receipts.shift(); // remove header
+  
+  // Calculate spent amounts for each budget/category
+  const spentAmounts = {};
+  receipts.forEach(row => {
+    const date = new Date(row[0]);
+    if (date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()) {
+      const budget = row[3];
+      const category = row[4];
+      const amount = Number(row[1]) || 0;
+      
+      if (!spentAmounts[budget]) {
+        spentAmounts[budget] = { total: 0, categories: {} };
+      }
+      spentAmounts[budget].total += amount;
+      
+      if (category) {
+        if (!spentAmounts[budget].categories[category]) {
+          spentAmounts[budget].categories[category] = 0;
+        }
+        spentAmounts[budget].categories[category] += amount;
+      }
+    }
+  });
+
+  // Get category data and calculate adjusted limits
+  const catData = catSheet.getDataRange().getValues();
+  catData.shift(); // remove header
+  
+  // Group categories by budget and calculate adjustments
+  const budgetCategories = {};
+  const budgetTotals = {};
+  
+  catData.forEach(row => {
+    const budget = row[0];
+    const category = row[1];
+    const baseLimit = Number(row[3]) || 0;
+    const spent = spentAmounts[budget]?.categories[category] || 0;
+    const overUnder = spent - baseLimit;
+    
+    if (!budgetCategories[budget]) {
+      budgetCategories[budget] = [];
+    }
+    
+    // Calculate adjustment for under-spent categories
+    let adjustedLimit = baseLimit;
+    // Only calculate adjustments if we're not in pre-fiscal year and not in first month
+    if (!isPreFiscalYear && !isFirstMonth && overUnder < 0) {
+      const remainingMonths = 12 - now.getMonth();
+      const redistributionPerMonth = Math.abs(overUnder) / remainingMonths;
+      adjustedLimit = baseLimit + redistributionPerMonth;
+    }
+    
+    budgetCategories[budget].push({ 
+      category, 
+      baseLimit,
+      spent,
+      overUnder,
+      adjustedLimit 
+    });
+    
+    // Track budget totals
+    if (!budgetTotals[budget]) {
+      budgetTotals[budget] = {
+        baseTotal: 0,
+        spentTotal: 0,
+        adjustedTotal: 0
+      };
+    }
+    budgetTotals[budget].baseTotal += baseLimit;
+    budgetTotals[budget].spentTotal += spent;
+    budgetTotals[budget].adjustedTotal += adjustedLimit;
+  });
+
+  // Add category entries with adjusted limits
+  Object.entries(budgetCategories).forEach(([budget, categories]) => {
+    categories.forEach(({ category, adjustedLimit }) => {
+      snapSheet.appendRow([monthStr, budget, category, adjustedLimit]);
+    });
+    
+    // Add budget-level entry with adjusted total
+    snapSheet.appendRow([monthStr, budget, '', budgetTotals[budget].adjustedTotal]);
+  });
+}
+
+function getMonthlyCategoryLimit(budget, category, now) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+  if (!snapSheet) return null;
+  
+  const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+  const data = snapSheet.getDataRange().getValues();
+  data.shift(); // remove header
+  
+  // Find the most recent entry for this budget/category
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    if (row[0] === monthStr && row[1] === budget && row[2] === category) {
+      return Number(row[3]) || 0;
+    }
+  }
+  return null;
+}
+
+function getMonthlyBudgetLimit(budget, now) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const snapSheet = ss.getSheetByName('MonthlyBudgetSnapshot');
+  if (!snapSheet) return null;
+  
+  const monthStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
+  const data = snapSheet.getDataRange().getValues();
+  data.shift(); // remove header
+  
+  // Find the most recent entry for this budget (empty category)
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    if (row[0] === monthStr && row[1] === budget && !row[2]) {
+      return Number(row[3]) || 0;
+    }
+  }
+  return null;
 } 

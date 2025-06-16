@@ -13,12 +13,29 @@ import { useNavigate } from 'react-router-dom';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { useGlobalState } from '../contexts/GlobalStateContext';
-import { getMonthStartEnd, getRollingMonthlyLimit } from '../utils/budget';
+import { getMonthStartEnd, getCurrentDate } from '../utils/budget';
 import BudgetProgressBar from './BudgetProgressBar';
 import { Link } from 'react-router-dom';
 import { AppBar, Toolbar, IconButton, Collapse } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import axios from 'axios';
+import styles from '../styles/Dashboard.module.css';
+import { API_BASE_URL } from '../config';
+
+interface BudgetData {
+  total: number;
+  categories: Record<string, number>;
+}
+
+interface GlobalSummary {
+  totalSpent: number;
+  receiptsCount: number;
+  budgetLimits: Record<string, BudgetData>;
+  spending: Record<string, BudgetData>;
+  totalBudgeted: number;
+  remaining: number;
+}
 
 const ACCENT = '#3b6ea5';
 const BLUE = '#232946';
@@ -26,13 +43,32 @@ const RED = '#e63946';
 const GREEN = '#1a4d2e';
 
 const Dashboard = () => {
-  const { budgets, summary, loading, error, categories } = useGlobalState();
+  const { loading: globalLoading, error: globalError, testDate } = useGlobalState();
+  const [summary, setSummary] = useState<GlobalSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({ open: false, message: '' });
   const [expanded, setExpanded] = useState<{ [budget: string]: boolean }>({});
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
+  useEffect(() => {
+    setLoading(true);
+    axios.get(`${API_BASE_URL}?action=getGlobalSummary${testDate ? `&date=${testDate}` : ''}`)
+      .then((summaryRes) => {
+        console.log('Raw Global Summary Response:', summaryRes.data);
+        console.log('Global Summary Data:', summaryRes.data.data);
+        setSummary(summaryRes.data.data.data);
+        setLoading(false);
+      })
+      .catch((error) => {
+        console.error('Error fetching global summary:', error);
+        setError('Failed to load global summary');
+        setLoading(false);
+      });
+  }, [testDate]);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -45,68 +81,36 @@ const Dashboard = () => {
     };
   }, []);
 
-  if (loading.budgets || loading.summary) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', flexDirection: 'column', gap: 2 }}>
-        <CircularProgress />
-        <Typography color="text.secondary">Loading...</Typography>
-      </Box>
-    );
-  }
-  if (error.budgets || error.summary) {
-    return (
-      <Box sx={{ textAlign: 'center', mt: 6, px: 2 }}>
-        <Typography color="error.main">{error.budgets || error.summary}</Typography>
-        {!isOnline && (
-          <Typography color="text.secondary" sx={{ mt: 2 }}>
-            You're offline. Showing cached data.
-          </Typography>
-        )}
-      </Box>
-    );
-  }
+  if (loading || globalLoading.summary) return <div className={styles.loading}>Loading...</div>;
+  if (error || globalError.summary) return <div className={styles.error}>{error || globalError.summary}</div>;
   if (!summary) return null;
 
-  const { startDate, endDate } = getMonthStartEnd();
-
-  // Calculate over/under budget sitewide
-  const totalBudgetLimit = budgets.reduce((sum, b) => sum + (Number(b.monthlyLimit) || 0), 0);
-  const overUnder = summary.totalSpent - totalBudgetLimit;
-  const isOver = overUnder > 0;
+  const currentDate = getCurrentDate(testDate);
 
   // Sort budgets: over-spent first
-  const dashboardBudgets = budgets
-    .map(b => {
-      const spent = Number(summary.budgetTotals[b.name]) || 0;
-      const limit = getRollingMonthlyLimit(Number(b.monthlyLimit) || 0, Number(summary.budgetYearToDateTotals?.[b.name]) || 0, new Date());
-      return { ...b, spent, limit };
+  const dashboardBudgets = Object.entries(summary.budgetLimits || {})
+    .map(([name, limitData]) => {
+      const spentData = summary.spending[name] || { total: 0, categories: {} };
+      return {
+        name,
+        spent: spentData.total,
+        limit: limitData.total,
+        categories: limitData.categories || {},
+        spentCategories: spentData.categories || {}
+      };
     })
     .sort((a, b) => {
       const aOver = a.spent > a.limit;
       const bOver = b.spent > b.limit;
       if (aOver && !bOver) return -1;
       if (!aOver && bOver) return 1;
-      // Otherwise, sort by % spent desc
       return (b.spent / b.limit) - (a.spent / a.limit);
     });
 
-  // Helper: get categories for a budget
-  const getBudgetCategories = (budgetName: string) =>
-    categories.filter((cat: any) => cat.budgetName === budgetName);
-
-  // Placeholder for yearly outlook and year-end estimate
-  const YearlyOutlookChart = () => (
-    <Box sx={{ height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ACCENT, fontSize: 14, opacity: 0.7 }}>
-      {/* Replace with chart lib later */}
-      [Yearly Outlook Chart]
-    </Box>
-  );
-  const YearEndEstimate = () => (
-    <Box sx={{ height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ACCENT, fontSize: 14, opacity: 0.7 }}>
-      {/* Replace with chart lib later */}
-      [Year-End Estimate]
-    </Box>
-  );
+  // Calculate over/under budget sitewide
+  const totalBudgetLimit = summary.totalBudgeted || 0;
+  const overUnder = summary.totalSpent - totalBudgetLimit;
+  const isOver = overUnder > 0;
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -136,26 +140,6 @@ const Dashboard = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ background: 'white', color: BLUE, borderRadius: 3, height: '100%' }}>
-            <CardContent>
-              <Typography variant="subtitle2" color={ACCENT} gutterBottom>
-                Yearly Outlook
-              </Typography>
-              <YearlyOutlookChart />
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ background: 'white', color: BLUE, borderRadius: 3, height: '100%' }}>
-            <CardContent>
-              <Typography variant="subtitle2" color={ACCENT} gutterBottom>
-                Estimate by Year End
-              </Typography>
-              <YearEndEstimate />
-            </CardContent>
-          </Card>
-        </Grid>
       </Grid>
 
       {/* Budgets Section */}
@@ -166,20 +150,8 @@ const Dashboard = () => {
         <Card sx={{ background: 'white', borderRadius: 3, boxShadow: '0 2px 8px rgba(35,41,70,0.06)', p: 0, overflow: 'hidden' }}>
           {dashboardBudgets.map((budget, idx) => {
             const overSpent = budget.spent > budget.limit;
-            const percentUsed = budget.limit ? (budget.spent / budget.limit) * 100 : 0;
-            const cats = getBudgetCategories(budget.name);
             const isExpanded = !!expanded[budget.name];
             
-            // Calculate overall budget status for this budget
-            const totalBudgetLimit = cats.reduce((sum, cat) => sum + (Number(cat.monthlyLimit) || 0), 0);
-            // Use budgetCategoryTotals for correct per-budget, per-category spent
-            const totalSpent = cats.reduce((sum, cat) => sum + (Number(summary.budgetCategoryTotals?.[budget.name]?.[cat.name]) || 0), 0);
-            const overallBudgetStatus = {
-              isOver: totalSpent > totalBudgetLimit,
-              totalSpent,
-              totalLimit: totalBudgetLimit
-            };
-
             return (
               <Box key={budget.name} sx={{
                 borderBottom: idx !== dashboardBudgets.length - 1 ? '1px solid #f0f1f6' : 'none',
@@ -195,17 +167,12 @@ const Dashboard = () => {
                       name={budget.name}
                       spent={budget.spent}
                       limit={budget.limit}
-                      startDate={startDate}
-                      endDate={endDate}
+                      startDate={getMonthStartEnd(currentDate).startDate}
+                      endDate={getMonthStartEnd(currentDate).endDate}
                       isOverall
                       hidePercentLabel
                     />
-                    {overSpent && !overallBudgetStatus.isOver && (
-                      <span style={{ color: '#3b6ea5', fontWeight: 700, marginLeft: 8, fontSize: 12 }}>
-                        Flexible Budget Available
-                      </span>
-                    )}
-                    {overSpent && overallBudgetStatus.isOver && (
+                    {overSpent && (
                       <span style={{ color: RED, fontWeight: 700, marginLeft: 8, fontSize: 12 }}>
                         Over Budget
                       </span>
@@ -215,7 +182,6 @@ const Dashboard = () => {
                     <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
                       <IconButton
                         onClick={() => setExpanded(e => {
-                          // Only one can expand at a time
                           const newState: typeof expanded = {};
                           if (!e[budget.name]) newState[budget.name] = true;
                           return newState;
@@ -230,31 +196,23 @@ const Dashboard = () => {
                   </Box>
                 </Box>
                 <Collapse in={isExpanded} timeout="auto" unmountOnExit sx={{ width: '100%' }}>
-                  <Box sx={{ pl: 4, pr: 2, py: 1, maxHeight: 320, overflowY: 'auto' }}>
-                    {cats.length === 0 ? (
-                      <Typography color="text.secondary" fontSize={13}>No categories</Typography>
-                    ) : (
-                      cats.map(cat => {
-                        // Use budgetCategoryTotals for correct per-budget, per-category spent
-                        const catSpent = summary.budgetCategoryTotals?.[budget.name]?.[cat.name] || 0;
-                        const catYearToDate = summary.categoryYearToDateTotals?.[budget.name]?.[cat.name] || 0;
-                        const catLimit = getRollingMonthlyLimit(Number(cat.monthlyLimit) || 0, catYearToDate, new Date());
-                        return (
-                          <Box key={cat.name} sx={{ mb: 1 }}>
-                            <BudgetProgressBar
-                              name={cat.name}
-                              spent={catSpent}
-                              limit={catLimit}
-                              startDate={startDate}
-                              endDate={endDate}
-                              hidePercentLabel
-                              isCategory
-                              overallBudgetStatus={overallBudgetStatus}
-                            />
-                          </Box>
-                        );
-                      })
-                    )}
+                  <Box sx={{ pl: 4, pr: 2, py: 1 }}>
+                    {Object.entries(budget.categories).map(([category, limit]) => {
+                      const spent = budget.spentCategories[category] || 0;
+                      return (
+                        <Box key={category} sx={{ mb: 1 }}>
+                          <BudgetProgressBar
+                            name={category}
+                            spent={spent}
+                            limit={limit}
+                            startDate={getMonthStartEnd(currentDate).startDate}
+                            endDate={getMonthStartEnd(currentDate).endDate}
+                            hidePercentLabel
+                            isCategory
+                          />
+                        </Box>
+                      );
+                    })}
                   </Box>
                 </Collapse>
               </Box>

@@ -5,6 +5,12 @@
   "runtimeVersion": "V8",
   "webapp": {
     "access": "ANYONE_ANONYMOUS",
-    "executeAs": "USER_ACCESSING"
+    "executeAs": "USER_ACCESSING",
+    "cors": {
+      "allowOrigin": "*",
+      "allowMethods": ["GET", "POST", "OPTIONS"],
+      "allowHeaders": ["Content-Type", "Authorization"],
+      "maxAge": 3600
+    }
   }
 } 

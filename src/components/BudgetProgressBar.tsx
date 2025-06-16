@@ -32,7 +32,7 @@ const BudgetProgressBar: React.FC<BudgetProgressBarProps> = ({
   const end = new Date(endDate);
   const totalDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
   const daysElapsed = Math.min(Math.max((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24), 0), totalDays);
-  const percentSpent = Math.min((spent / limit) * 100, 100);
+  const percentSpent = (spent / limit) * 100;
   const percentTime = Math.min((daysElapsed / totalDays) * 100, 100);
 
   // Handle unlimited category
@@ -109,7 +109,7 @@ const BudgetProgressBar: React.FC<BudgetProgressBarProps> = ({
           <div
             className={styles.progressBarFill}
             style={{
-              width: `${percentSpent}%`,
+              width: `${Math.min(percentSpent, 100)}%`,
               background: isOverall
                 ? 'linear-gradient(90deg, #1a4d2e 60%, #3b6ea5 100%)'
                 : hasBudgetFlexibility

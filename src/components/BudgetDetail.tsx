@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import styles from '../styles/BudgetDetail.module.css';
 import BudgetProgressBar from './BudgetProgressBar';
-import { getRollingMonthlyLimit } from '../utils/budget';
+import { getCurrentDate } from '../utils/budget';
 import { useGlobalState } from '../contexts/GlobalStateContext';
 import { API_BASE_URL } from '../config';
 
@@ -14,17 +14,19 @@ interface BudgetSummary {
   totalSpent: number;
   receiptsCount: number;
   categoryTotals: Record<string, number>;
-  categoryYearToDateTotals?: Record<string, number>;
+  categoryYearToDateTotals?: Record<string, Record<string, number>>;
+  budgetCategoryTotals?: Record<string, Record<string, number>>;
+  totalBudgeted?: number;
+  categoryLimits?: Record<string, number>;
 }
 
 interface CategoryLimit {
   [category: string]: number;
 }
 
-const getMonthStartEnd = () => {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+const getMonthStartEnd = (date: Date) => {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
   return {
     startDate: start.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10),
@@ -35,7 +37,7 @@ const getMonthStartEnd = () => {
 
 const BudgetDetail = () => {
   const { budgetName = '' } = useParams<{ budgetName: string }>();
-  const { categories, loading: globalLoading, error: globalError } = useGlobalState();
+  const { categories, loading: globalLoading, error: globalError, testDate } = useGlobalState();
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [categoryLimits, setCategoryLimits] = useState<CategoryLimit>({});
   const [loading, setLoading] = useState(true);
@@ -43,81 +45,64 @@ const BudgetDetail = () => {
 
   useEffect(() => {
     setLoading(true);
-    axios.get(`${API_BASE_URL}?action=getBudgetSummary&budget=${encodeURIComponent(budgetName)}`)
+    axios.get(`${API_BASE_URL}?action=getBudgetSummary&budget=${encodeURIComponent(budgetName)}${testDate ? `&date=${testDate}` : ''}`)
       .then((summaryRes) => {
+        console.log('Budget Summary Response:', summaryRes.data.data);
         setSummary(summaryRes.data.data);
-        // Find category limits for this budget
-        const catLimits: CategoryLimit = {};
-        if (Array.isArray(categories)) {
-          categories.forEach((cat: any) => {
-            if (cat.budgetName === budgetName) {
-              catLimits[cat.name] = Number(cat.monthlyLimit) || 0;
-            }
-          });
-        }
-        setCategoryLimits(catLimits);
+        setCategoryLimits(summaryRes.data.data.categoryLimits || {});
         setLoading(false);
       })
       .catch(() => {
         setError('Failed to load budget summary');
         setLoading(false);
       });
-  }, [budgetName, categories]);
+  }, [budgetName, categories, testDate]);
 
   if (loading || globalLoading.categories) return <div className={styles.loading}>Loading...</div>;
   if (error || globalError.categories) return <div className={styles.error}>{error || globalError.categories}</div>;
   if (!summary) return null;
 
-  const { startDate, endDate } = getMonthStartEnd();
-  const totalLimit = Object.values(categoryLimits).reduce((a, b) => a + (Number(b) || 0), 0);
+  const currentDate = getCurrentDate(testDate);
+  const { startDate, endDate } = getMonthStartEnd(currentDate);
+  
+  // Use the snapshot's total budget limit if available
+  const totalLimit = summary.totalBudgeted || 0;
+  
   // This month's spending for all categories
   const overallSpent = summary.totalSpent || 0;
+  
   // Year-to-date spending for all categories (current budget year only)
   const overallYearToDateSpent = summary.categoryYearToDateTotals
     ? Object.values(summary.categoryYearToDateTotals).reduce((a, b) => a + (Number(b) || 0), 0)
     : 0;
-  // Use real date
-  const date = new Date();
-  const rollingOverallLimit = getRollingMonthlyLimit(totalLimit, overallYearToDateSpent, date);
 
   return (
     <div className={styles.budgetDetail}>
-      <h1 style={{ color: BLUE, textAlign: 'center', marginBottom: '2rem' }}>{budgetName} Budget</h1>
-      <div style={{ marginBottom: '2rem' }}>
-        <BudgetProgressBar
-          name="Overall Budget"
-          spent={overallSpent}
-          limit={rollingOverallLimit}
-          startDate={startDate}
-          endDate={endDate}
-          isOverall
-        />
-      </div>
-      <div className={styles.summaryCards}>
-        <div className={styles.card} style={{ background: LIGHT, color: BLUE }}>
-          <div className={styles.cardLabel}>Total Spent This Month</div>
-          <div className={styles.cardValue}>${summary.totalSpent.toFixed(2)}</div>
-        </div>
-        <div className={styles.card} style={{ background: LIGHT, color: BLUE }}>
-          <div className={styles.cardLabel}>Receipts This Month</div>
-          <div className={styles.cardValue}>{summary.receiptsCount}</div>
-        </div>
-        <div className={styles.card} style={{ background: LIGHT, color: BLUE }}>
-          <div className={styles.cardLabel}>Budget Limit (Sum of Categories)</div>
-          <div className={styles.cardValue}>${totalLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+      <div className={styles.header}>
+        <h1>{budgetName}</h1>
+        <div className={styles.summary}>
+          <div className={styles.summaryItem}>
+            <span>This Month</span>
+            <span className={styles.amount}>€{overallSpent.toFixed(2)}</span>
+            <span className={styles.limit}>of €{totalLimit.toFixed(2)}</span>
+          </div>
+          <div className={styles.summaryItem}>
+            <span>Year to Date</span>
+            <span className={styles.amount}>€{overallYearToDateSpent.toFixed(2)}</span>
+          </div>
         </div>
       </div>
+
       <div className={styles.progressList}>
         {Object.entries(categoryLimits).map(([cat, limit]) => {
-          const spent = Number(summary.categoryTotals[cat]) || 0;
-          const date = new Date();
-          const rollingLimit = getRollingMonthlyLimit(Number(limit) || 0, spent, date);
+          const spent = summary.budgetCategoryTotals?.[budgetName]?.[cat] || 0;
+          const snapshotLimit = summary.categoryLimits?.[cat] ?? 0;
           return (
             <BudgetProgressBar
               key={cat}
               name={cat}
               spent={spent}
-              limit={rollingLimit}
+              limit={snapshotLimit}
               startDate={startDate}
               endDate={endDate}
             />
@@ -126,7 +111,7 @@ const BudgetDetail = () => {
         {/* Overall bar */}
         <BudgetProgressBar
           name="Overall"
-          spent={Object.values(summary.categoryTotals).reduce((a, b) => a + (Number(b) || 0), 0)}
+          spent={Object.values(summary.budgetCategoryTotals?.[budgetName] || {}).reduce((a, b) => a + (Number(b) || 0), 0)}
           limit={totalLimit}
           startDate={startDate}
           endDate={endDate}

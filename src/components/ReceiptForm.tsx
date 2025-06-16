@@ -13,8 +13,8 @@ import {
   Alert,
   CircularProgress,
   Stack,
-  Checkbox,
-  FormControlLabel
+  FormControlLabel,
+  Grid
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -32,9 +32,7 @@ interface FormData {
   date: Date;
   vendor: string;
   card: string;
-  description: string;
   photo: File | null;
-  monthlyExpense: boolean;
 }
 
 interface BudgetData {
@@ -62,9 +60,7 @@ export const ReceiptForm = () => {
     date: new Date(),
     vendor: '',
     card: '',
-    description: '',
     photo: null,
-    monthlyExpense: false,
   });
   const [amount, setAmount] = useState('');
   const [selectedBudgetSpent, setSelectedBudgetSpent] = useState(0);
@@ -72,12 +68,17 @@ export const ReceiptForm = () => {
 
   // Get selected budget and category data
   const selectedBudgetObj = budgets.find((b: BudgetData) => b.name === selectedBudget);
-  const selectedBudgetYTD = summary && selectedBudget ? summary.budgetYearToDateTotals?.[selectedBudget] || 0 : 0;
-  const rollingBudgetLimit = getRollingMonthlyLimit(selectedBudgetObj ? selectedBudgetObj.monthlyLimit : 0, selectedBudgetYTD, new Date());
+  const budgetLimit = summary?.data?.budgetLimits?.[selectedBudget]?.total ?? 0;
+  const categoryLimit = summary?.data?.budgetLimits?.[selectedBudget]?.categories?.[selectedCategory] ?? 0;
 
-  const selectedCategoryObj = categories.find((c: any) => c.name === selectedCategory && c.budgetName === selectedBudget);
-  const selectedCategoryYTD = summary && selectedCategory ? summary.categoryYearToDateTotals?.[selectedCategory] || 0 : 0;
-  const rollingCategoryLimit = getRollingMonthlyLimit(selectedCategoryObj ? selectedCategoryObj.monthlyLimit : 0, selectedCategoryYTD, new Date());
+  // Use spending for actual spent amounts
+  const budgetSpent = summary?.data?.spending?.[selectedBudget]?.total ?? 0;
+  const categorySpent = summary?.data?.spending?.[selectedBudget]?.categories?.[selectedCategory] ?? 0;
+
+  // Dynamically include the value in the amount field
+  const amountValue = parseFloat(amount) || 0;
+  const shownBudgetSpent = budgetSpent + (selectedBudget && amount ? amountValue : 0);
+  const shownCategorySpent = categorySpent + (selectedCategory && amount ? amountValue : 0);
 
   // Load last used budget from localStorage
   useEffect(() => {
@@ -135,8 +136,8 @@ export const ReceiptForm = () => {
     console.log('summary:', summary);
     console.log('selectedBudgetObj:', selectedBudgetObj);
     console.log('selectedBudgetSpent:', selectedBudgetSpent);
-    console.log('selectedBudgetLimit:', rollingBudgetLimit);
-  }, [selectedBudget, summary, selectedBudgetObj, selectedBudgetSpent, rollingBudgetLimit]);
+    console.log('budgetLimit:', budgetLimit);
+  }, [selectedBudget, summary, selectedBudgetObj, selectedBudgetSpent, budgetLimit]);
 
   // Add effect to update budget calculations when amount changes
   useEffect(() => {
@@ -148,6 +149,29 @@ export const ReceiptForm = () => {
       }
     }
   }, [amount, selectedBudget, selectedCategory]);
+
+  useEffect(() => {
+    const availableBudgets = Object.keys(summary?.data?.budgetLimits || {});
+    if (selectedBudget && !availableBudgets.includes(selectedBudget)) {
+      setSelectedBudget('');
+    }
+  }, [summary, selectedBudget]);
+
+  // Format as cents to euros as user types
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let raw = e.target.value.replace(/\D/g, ''); // Remove non-digits
+    if (!raw) raw = '0';
+    // Convert to euros
+    const euros = (parseInt(raw, 10) / 100).toFixed(2);
+    setAmount(euros);
+    setFormData(prev => ({ ...prev, amount: euros }));
+  };
+
+  // Format for display with euro symbol
+  const formatAmountDisplay = (value: string) => {
+    if (!value) return '';
+    return `€${Number(value).toLocaleString('de-DE', { minimumFractionDigits: 2 })}`;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,24 +196,41 @@ export const ReceiptForm = () => {
       }
 
       const formDataToSend = new URLSearchParams();
-      formDataToSend.append('amount', formData.amount);
-      formDataToSend.append('date', format(formData.date, 'yyyy-MM-dd'));
-      formDataToSend.append('description', formData.description);
-      formDataToSend.append('budget', selectedBudget);
-      formDataToSend.append('category', selectedCategory);
-      formDataToSend.append('vendor', formData.vendor);
-      formDataToSend.append('card', formData.card);
-      formDataToSend.append('monthlyExpense', formData.monthlyExpense.toString());
-      if (photoBase64) {
-        formDataToSend.append('pdf', photoBase64);
-        formDataToSend.append('pdfIsNative', pdfIsNative.toString());
-      }
+      formDataToSend.append('action', 'submitReceipt');
+      formDataToSend.append('data', JSON.stringify({
+        amount,
+        date: format(formData.date, 'yyyy-MM-dd'),
+        budget: selectedBudget,
+        category: selectedCategory,
+        vendor: formData.vendor,
+        card: formData.card,
+        description: formData.vendor, // Using vendor as description since we removed the description field
+        pdf: photoBase64,
+        pdfIsNative: pdfIsNative
+      }));
+
+      console.log('Submitting form data:', {
+        action: 'submitReceipt',
+        amount,
+        date: format(formData.date, 'yyyy-MM-dd'),
+        budget: selectedBudget,
+        category: selectedCategory,
+        vendor: formData.vendor,
+        card: formData.card,
+        hasPhoto: !!photoBase64
+      });
 
       const response = await axios.post(API_BASE_URL, formDataToSend.toString(), {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
         },
+        withCredentials: false,
+        maxRedirects: 5,
+        validateStatus: (status) => status >= 200 && status < 300,
       });
+
+      console.log('Response:', response);
 
       if (response.data.success) {
         setSuccess(true);
@@ -198,16 +239,22 @@ export const ReceiptForm = () => {
           date: new Date(),
           vendor: '',
           card: '',
-          description: '',
           photo: null,
-          monthlyExpense: false,
         });
+        setAmount('');
         setSelectedBudget('');
         setSelectedCategory('');
       } else {
         setError(response.data.error || 'Failed to submit receipt');
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Submit error details:', {
+        message: error.message,
+        code: error.code,
+        response: error.response?.data,
+        status: error.response?.status,
+        headers: error.response?.headers
+      });
       setError('Failed to submit receipt. Please try again.');
     } finally {
       setLoading(false);
@@ -273,20 +320,40 @@ export const ReceiptForm = () => {
         </Typography>
         <form onSubmit={handleSubmit}>
           <Stack spacing={3}>
-            <FormControl fullWidth>
-              <InputLabel>Budget</InputLabel>
-              <Select
-                value={selectedBudget}
-                onChange={(e) => setSelectedBudget(e.target.value)}
-                label="Budget"
-              >
-                {budgets.map((budget) => (
-                  <MenuItem key={budget.name} value={budget.name}>
-                    {budget.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Budget</InputLabel>
+                  <Select
+                    value={selectedBudget}
+                    onChange={(e) => setSelectedBudget(e.target.value)}
+                    label="Budget"
+                  >
+                    {Object.keys(summary?.data?.budgetLimits || {}).map((budgetName) => (
+                      <MenuItem key={budgetName} value={budgetName}>
+                        {budgetName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Category</InputLabel>
+                  <Select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    label="Category"
+                  >
+                    {Object.keys(summary?.data?.budgetLimits?.[selectedBudget]?.categories || {}).map((categoryName) => (
+                      <MenuItem key={categoryName} value={categoryName}>
+                        {categoryName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
 
             {/* Budget Progress Section */}
             {selectedBudget && (
@@ -297,7 +364,7 @@ export const ReceiptForm = () => {
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                     <Typography variant="body2" color="text.secondary">Overall Budget</Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {formatCurrency(selectedBudgetSpent)} / {formatCurrency(rollingBudgetLimit)}
+                      {formatCurrency(shownBudgetSpent)} / {formatCurrency(budgetLimit)}
                     </Typography>
                   </Box>
                   <Box sx={{ width: '100%', bgcolor: 'grey.200', borderRadius: 1, height: 8 }}>
@@ -306,7 +373,7 @@ export const ReceiptForm = () => {
                         bgcolor: 'primary.main',
                         height: 8,
                         borderRadius: 1,
-                        width: `${Math.min(100, (selectedBudgetSpent / (rollingBudgetLimit || 1)) * 100)}%`
+                        width: `${Math.min(100, (shownBudgetSpent / (budgetLimit || 1)) * 100)}%`
                       }}
                     />
                   </Box>
@@ -317,7 +384,7 @@ export const ReceiptForm = () => {
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                       <Typography variant="body2" color="text.secondary">Category: {selectedCategory}</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {formatCurrency(selectedCategorySpent)} / {formatCurrency(rollingCategoryLimit)}
+                        {formatCurrency(shownCategorySpent)} / {formatCurrency(categoryLimit)}
                       </Typography>
                     </Box>
                     <Box sx={{ width: '100%', bgcolor: 'grey.200', borderRadius: 1, height: 8 }}>
@@ -326,7 +393,7 @@ export const ReceiptForm = () => {
                           bgcolor: 'success.main',
                           height: 8,
                           borderRadius: 1,
-                          width: `${Math.min(100, (selectedCategorySpent / (rollingCategoryLimit || 1)) * 100)}%`
+                          width: `${Math.min(100, (shownCategorySpent / (categoryLimit || 1)) * 100)}%`
                         }}
                       />
                     </Box>
@@ -335,115 +402,89 @@ export const ReceiptForm = () => {
               </Paper>
             )}
 
-            <FormControl fullWidth>
-              <InputLabel>Category</InputLabel>
-              <Select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                label="Category"
-              >
-                {categories
-                  .filter((category) => category.budgetName === selectedBudget)
-                  .map((category) => (
-                    <MenuItem key={category.name} value={category.name}>
-                      {category.name}
-                    </MenuItem>
-                  ))}
-              </Select>
-            </FormControl>
-
-            <FormControl fullWidth>
-              <InputLabel>Card</InputLabel>
-              <Select
-                value={formData.card}
-                onChange={handleCardChange}
-                label="Card"
-              >
-                {cards.map((card) => (
-                  <MenuItem key={card.card} value={card.card}>
-                    {card.card}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <TextField
-              label="Amount"
-              type="number"
-              value={amount}
-              onChange={(e) => {
-                setAmount(e.target.value);
-              }}
-              fullWidth
-              required
-              inputProps={{ step: "0.01" }}
-            />
-
-            <LocalizationProvider dateAdapter={AdapterDateFns}>
-              <DatePicker
-                label="Date"
-                value={formData.date}
-                onChange={handleDateChange}
-              />
-            </LocalizationProvider>
-
-            <TextField
-              label="Vendor"
-              value={formData.vendor}
-              onChange={handleInputChange('vendor')}
-              fullWidth
-              required
-            />
-
-            <TextField
-              label="Description"
-              value={formData.description}
-              onChange={handleInputChange('description')}
-              fullWidth
-              multiline
-              rows={4}
-              required
-            />
-
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={formData.monthlyExpense}
-                  onChange={(e) => setFormData(prev => ({ ...prev, monthlyExpense: e.target.checked }))}
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Amount"
+                  value={formatAmountDisplay(amount)}
+                  onChange={handleAmountChange}
+                  onFocus={e => e.target.select()}
+                  fullWidth
+                  required
+                  inputProps={{ inputMode: "numeric" }}
                 />
-              }
-              label="Monthly Expense"
-            />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <LocalizationProvider dateAdapter={AdapterDateFns}>
+                  <DatePicker
+                    label="Date"
+                    value={formData.date}
+                    onChange={handleDateChange}
+                    slotProps={{ textField: { fullWidth: true, required: true } }}
+                  />
+                </LocalizationProvider>
+              </Grid>
+            </Grid>
 
-            <Button
-              variant="contained"
-              component="label"
-              startIcon={<ImageIcon />}
-            >
-              Upload Receipt
-              <input
-                type="file"
-                hidden
-                accept="image/*,.pdf"
-                onChange={handleFileChange}
-              />
-            </Button>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth>
+                  <InputLabel>Card</InputLabel>
+                  <Select
+                    value={formData.card}
+                    onChange={handleCardChange}
+                    label="Card"
+                  >
+                    {cards.map((card) => (
+                      <MenuItem key={card.card} value={card.card}>
+                        {card.card}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={9}>
+                <TextField
+                  label="Vendor"
+                  value={formData.vendor}
+                  onChange={handleInputChange('vendor')}
+                  fullWidth
+                  required
+                />
+              </Grid>
+            </Grid>
 
-            {formData.photo && (
-              <Typography variant="body2" color="text.secondary">
-                Selected file: {formData.photo.name}
-              </Typography>
+            {!formData.photo ? (
+              <Button
+                variant="contained"
+                component="label"
+                startIcon={<ImageIcon />}
+                fullWidth
+              >
+                Upload Receipt
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*,.pdf"
+                  onChange={handleFileChange}
+                />
+              </Button>
+            ) : (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Selected file: {formData.photo.name}
+                </Typography>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  color="success"
+                  disabled={loading}
+                  fullWidth
+                >
+                  {loading ? <CircularProgress size={24} /> : 'Confirm Submission'}
+                </Button>
+              </Box>
             )}
-
-            <Button
-              type="submit"
-              variant="contained"
-              color="primary"
-              disabled={loading}
-              fullWidth
-            >
-              {loading ? <CircularProgress size={24} /> : 'Submit Receipt'}
-            </Button>
 
             {error && (
               <Alert severity="error" onClose={() => setError(null)}>
