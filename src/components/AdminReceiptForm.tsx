@@ -7,7 +7,6 @@ import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Checkbox from '@mui/material/Checkbox';
-import FormControlLabel from '@mui/material/FormControlLabel';
 import MenuItem from '@mui/material/MenuItem';
 import { Link } from 'react-router-dom';
 import IconButton from '@mui/material/IconButton';
@@ -24,9 +23,16 @@ import DialogActions from '@mui/material/DialogActions';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import Autocomplete from '@mui/material/Autocomplete';
+import { useAuth } from '../contexts/AuthContext';
+import CircularProgress from '@mui/material/CircularProgress';
+import Paper from '@mui/material/Paper';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 
 const AdminReceiptForm: React.FC = () => {
   const { summary, cards } = useGlobalState();
+  const { user } = useAuth();
   const [amount, setAmount] = useState('');
   const [vendor, setVendor] = useState('');
   const [budget, setBudget] = useState('');
@@ -38,12 +44,20 @@ const AdminReceiptForm: React.FC = () => {
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [pdfIsNative, setPdfIsNative] = useState(false);
+  const [fileType, setFileType] = useState<string>('');
   const [card, setCard] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showMonthlyModal, setShowMonthlyModal] = useState(false);
+  const [vendorSuggestions, setVendorSuggestions] = useState<string[]>([]);
+  const [submissions, setSubmissions] = useState<Array<{
+    id: string;
+    status: 'submitting' | 'success' | 'error';
+    data: any;
+    timestamp: number;
+  }>>([]);
 
   // Set today's date as default on mount
   useEffect(() => {
@@ -56,16 +70,144 @@ const AdminReceiptForm: React.FC = () => {
     }
   }, [date]);
 
+  // Load last used budget, category, and card from localStorage immediately
+  useEffect(() => {
+    const lastUsedBudget = localStorage.getItem('lastUsedBudget');
+    const lastUsedCategory = localStorage.getItem('lastUsedCategory');
+    const lastUsedCard = localStorage.getItem('lastUsedCard');
+    
+    if (lastUsedBudget) {
+      setBudget(lastUsedBudget);
+    }
+    if (lastUsedCategory) {
+      setCategory(lastUsedCategory);
+    }
+    if (lastUsedCard) {
+      setCard(lastUsedCard);
+    }
+  }, []);
+
+  // Save selected budget to localStorage
+  useEffect(() => {
+    if (budget) {
+      localStorage.setItem('lastUsedBudget', budget);
+    }
+  }, [budget]);
+
+  // Save selected category to localStorage
+  useEffect(() => {
+    if (category) {
+      localStorage.setItem('lastUsedCategory', category);
+    }
+  }, [category]);
+
+  // Save selected card to localStorage
+  useEffect(() => {
+    if (card) {
+      localStorage.setItem('lastUsedCard', card);
+    }
+  }, [card]);
+
+  // Fetch vendor suggestions
+  const fetchVendorSuggestions = async () => {
+    if (!user) return;
+    
+    try {
+      const response = await axios.post(API_BASE_URL, new URLSearchParams({
+        action: 'getVendorSuggestions',
+        data: JSON.stringify({
+          userEmail: user.email
+        })
+      }).toString(), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        withCredentials: false,
+      });
+
+      if (response.data.success && response.data.vendors) {
+        setVendorSuggestions(response.data.vendors);
+      }
+    } catch (error) {
+      console.error('Failed to fetch vendor suggestions:', error);
+    }
+  };
+
+  // Load vendor suggestions when user is authenticated
+  useEffect(() => {
+    if (user) {
+      fetchVendorSuggestions();
+    }
+  }, [user]);
+
+  // Filter vendor suggestions based on current input
+  const getFilteredVendorSuggestions = (inputValue: string) => {
+    if (!inputValue) return vendorSuggestions.slice(0, 3);
+    
+    const filtered = vendorSuggestions
+      .filter(vendor => 
+        vendor.toLowerCase().includes(inputValue.toLowerCase())
+      )
+      .slice(0, 3);
+    
+    return filtered;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess(false);
     setLoading(true);
+
+    // Store the current form data for submission
+    const currentFormData = {
+      amount,
+      date,
+      vendor,
+      budget,
+      category,
+      card,
+      description,
+      monthlyExpense,
+      startDate,
+      endDate
+    };
+
+    // Create a unique ID for this submission
+    const submissionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    
+    // Add submission to tracking
+    setSubmissions(prev => [...prev, {
+      id: submissionId,
+      status: 'submitting',
+      data: currentFormData,
+      timestamp: Date.now()
+    }]);
+
+    // Immediately reset the form for better UX
+    setAmount('');
+    setVendor('');
+    setBudget('');
+    setCategory('');
+    setCard('');
+    setDescription('');
+    setMonthlyExpense(false);
+    setPhoto(null);
+    setPhotoBase64(null);
+    setPdfIsNative(false);
+    setFileType('');
+    setStartDate('');
+    setEndDate('');
+    
+    // Reset loading state immediately so user can submit another receipt
+    setLoading(false);
+
     try {
       const formDataToSend = new URLSearchParams();
-      formDataToSend.append('action', 'submitReceipt');
-      formDataToSend.append('data', JSON.stringify({
-        amount,
+      
+      // Prepare the data object
+      const submissionData: any = {
+        amount: (parseFloat(amount) * 100).toString(), // Convert euros to cents for backend
         date,
         vendor,
         budget,
@@ -75,8 +217,22 @@ const AdminReceiptForm: React.FC = () => {
         monthlyExpense,
         pdf: photoBase64,
         pdfIsNative: pdfIsNative,
-        ...(monthlyExpense ? { startDate, endDate } : {})
-      }));
+        fileType,
+        userEmail: user?.email || '',
+        userName: user?.displayName || user?.email || 'Unknown User',
+      };
+
+      // Only include startDate and endDate if monthlyExpense is true AND they have values
+      if (monthlyExpense && startDate) {
+        submissionData.startDate = startDate;
+      }
+      if (monthlyExpense && endDate) {
+        submissionData.endDate = endDate;
+      }
+
+      console.log('Admin submission data:', submissionData);
+      
+      formDataToSend.append('data', JSON.stringify(submissionData));
       const response = await axios.post(API_BASE_URL, formDataToSend.toString(), {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -87,46 +243,55 @@ const AdminReceiptForm: React.FC = () => {
         validateStatus: (status) => status >= 200 && status < 300,
       });
       if (response.data.success) {
-        setSuccess(true);
-        setAmount('');
-        setVendor('');
-        setBudget('');
-        setCategory('');
-        setCard('');
-        setDescription('');
-        setMonthlyExpense(false);
-        setPhoto(null);
-        setPhotoBase64(null);
-        setPdfIsNative(false);
+        // Update submission status to success
+        setSubmissions(prev => prev.map(sub => 
+          sub.id === submissionId ? { ...sub, status: 'success' } : sub
+        ));
+        
+        // Remove success submission after 4 seconds
+        setTimeout(() => {
+          setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
+        }, 4000);
       } else {
-        setError(response.data.error || 'Failed to submit receipt');
+        // Update submission status to error
+        setSubmissions(prev => prev.map(sub => 
+          sub.id === submissionId ? { ...sub, status: 'error' } : sub
+        ));
+        
+        // Remove error submission after 6 seconds
+        setTimeout(() => {
+          setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
+        }, 6000);
       }
     } catch (err: any) {
-      setError('Failed to submit receipt. Please try again.');
-    } finally {
-      setLoading(false);
+      // Update submission status to error
+      setSubmissions(prev => prev.map(sub => 
+        sub.id === submissionId ? { ...sub, status: 'error' } : sub
+      ));
+      
+      // Remove error submission after 6 seconds
+      setTimeout(() => {
+        setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
+      }, 6000);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
+    
     setPhoto(file);
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      // Check if it's a PDF
-      if (file.type === 'application/pdf') {
-        setPdfIsNative(true);
-        // Remove the prefix if present
-        const base64 = result.split(',')[1] || result;
-        setPhotoBase64(base64);
-      } else {
-        setPdfIsNative(false);
-        // Remove the prefix if present
-        const base64 = result.split(',')[1] || result;
-        setPhotoBase64(base64);
-      }
+      // Only set native flag for actual PDFs - other files will be converted
+      const isPDF = file.type === 'application/pdf';
+      setPdfIsNative(isPDF);
+      setFileType(file.type);
+      
+      // Remove the prefix if present
+      const base64 = result.split(',')[1] || result;
+      setPhotoBase64(base64);
     };
     reader.readAsDataURL(file);
   };
@@ -135,6 +300,7 @@ const AdminReceiptForm: React.FC = () => {
     setPhoto(null);
     setPhotoBase64(null);
     setPdfIsNative(false);
+    setFileType('');
   };
 
   // Get budget options from summary
@@ -171,6 +337,10 @@ const AdminReceiptForm: React.FC = () => {
   };
 
   const handleMonthlyModalSave = () => {
+    // Ensure startDate is set - default to current date if not set
+    if (!startDate) {
+      setStartDate(date || new Date().toISOString().slice(0, 10));
+    }
     setMonthlyExpense(true);
     setShowMonthlyModal(false);
   };
@@ -190,7 +360,7 @@ const AdminReceiptForm: React.FC = () => {
       {error && <div className={styles.error}>{error}</div>}
       {success && <div className={styles.success}>Receipt submitted successfully!</div>}
       <Grid container spacing={2}>
-        <Grid item xs={12} sm={3}>
+        <Grid item xs={12} sm={2}>
           <TextField
             label="Amount (€)"
             value={formatAmountDisplay(amount)}
@@ -198,9 +368,10 @@ const AdminReceiptForm: React.FC = () => {
             required
             fullWidth
             inputProps={{ inputMode: 'numeric' }}
+            InputLabelProps={{ shrink: true }}
           />
         </Grid>
-        <Grid item xs={12} sm={3}>
+        <Grid item xs={12} sm={4}>
           <TextField
             label="Date"
             type="date"
@@ -212,12 +383,25 @@ const AdminReceiptForm: React.FC = () => {
           />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField
-            label="Vendor"
+          <Autocomplete
             value={vendor}
-            onChange={e => setVendor(e.target.value)}
-            required
-            fullWidth
+            onChange={(_, newValue) => {
+              setVendor(newValue || '');
+            }}
+            onInputChange={(_, newInputValue) => {
+              setVendor(newInputValue);
+            }}
+            options={getFilteredVendorSuggestions(vendor)}
+            freeSolo
+            renderInput={(params) => (
+              <TextField 
+                {...params} 
+                label="Vendor" 
+                fullWidth 
+                required 
+                InputLabelProps={{ shrink: true }} 
+              />
+            )}
           />
         </Grid>
         <Grid item xs={12} sm={6}>
@@ -231,6 +415,7 @@ const AdminReceiptForm: React.FC = () => {
             }}
             required
             fullWidth
+            InputLabelProps={{ shrink: true }}
           >
             {budgetOptions.map(b => (
               <MenuItem key={b} value={b}>{b}</MenuItem>
@@ -246,6 +431,7 @@ const AdminReceiptForm: React.FC = () => {
             required
             fullWidth
             disabled={!budget}
+            InputLabelProps={{ shrink: true }}
           >
             {categoryOptions.map(c => (
               <MenuItem key={c} value={c}>{c}</MenuItem>
@@ -259,6 +445,7 @@ const AdminReceiptForm: React.FC = () => {
             value={card}
             onChange={e => setCard(e.target.value)}
             fullWidth
+            InputLabelProps={{ shrink: true }}
           >
             <MenuItem value="">None</MenuItem>
             {cardOptions.map((c: string) => (
@@ -273,6 +460,7 @@ const AdminReceiptForm: React.FC = () => {
             onChange={e => setDescription(e.target.value)}
             fullWidth
             placeholder="Optional"
+            InputLabelProps={{ shrink: true }}
           />
         </Grid>
         <Grid item xs={12} sm={6}>
@@ -341,7 +529,7 @@ const AdminReceiptForm: React.FC = () => {
               Upload Receipt (optional)
               <input
                 type="file"
-                accept="application/pdf,image/*"
+                accept="application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,image/*"
                 hidden
                 onChange={handleFileChange}
               />
@@ -370,6 +558,55 @@ const AdminReceiptForm: React.FC = () => {
       <div style={{ marginTop: 24, textAlign: 'center' }}>
         <Link to="/submit-receipt">Go to regular Submit Receipt form</Link>
       </div>
+
+      {/* Submission Status Cards */}
+      {submissions.length > 0 && (
+        <Box sx={{ mt: 3, width: '100%' }}>
+          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+            Submission Status
+          </Typography>
+          <Stack spacing={1}>
+            {submissions.map((submission) => (
+              <Paper
+                key={submission.id}
+                elevation={1}
+                sx={{
+                  p: 2,
+                  bgcolor: submission.status === 'submitting' ? '#e6f3ff' : 
+                           submission.status === 'success' ? '#f0f8ff' : '#fff5f5',
+                  border: submission.status === 'submitting' ? '1px solid #4a90e2' :
+                         submission.status === 'success' ? '1px solid #4a90e2' : '1px solid #f44336',
+                  borderRadius: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                }}
+              >
+                {submission.status === 'submitting' && (
+                  <CircularProgress size={20} sx={{ color: '#4a90e2' }} />
+                )}
+                {submission.status === 'success' && (
+                  <Box sx={{ color: '#4a90e2', fontSize: 20 }}>✔️</Box>
+                )}
+                {submission.status === 'error' && (
+                  <Box sx={{ color: '#f44336', fontSize: 20 }}>❌</Box>
+                )}
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    {submission.data.vendor} - €{submission.data.amount}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {submission.status === 'submitting' && 'Submitting...'}
+                    {submission.status === 'success' && 'Successfully submitted'}
+                    {submission.status === 'error' && 'Failed to submit'}
+                  </Typography>
+                </Box>
+              </Paper>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
       {/* Monthly Expense Modal */}
       <LocalizationProvider dateAdapter={AdapterDateFns}>
         <Dialog open={showMonthlyModal} onClose={handleMonthlyModalCancel}>

@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-export const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbxgpCFWAgmtrqmKJ1PHJAFsyE-jfBFDNK7bf6f1jx1MWfbV0ZvTsWPTW17dpYfAC8sRYg/exec';
+// TODO: Update this URL with the new deployment URL from the correct Google Apps Script project
+export const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbx49S2FIU4lgI2WEo811kLAesOQJ18zBBds0PuHzkOx9FXv1mA9KRFTg_lqpgcit_UT/exec';
 
 // Create a shared axios instance with the correct configuration
 export const api = axios.create({
@@ -12,33 +13,4 @@ export const api = axios.create({
     'Content-Type': 'application/json'
   },
   withCredentials: false // Important for CORS
-});
-
-// Add request interceptor for debugging
-api.interceptors.request.use(
-  (config) => {
-    console.log('Making request to:', config.url);
-    return config;
-  },
-  (error) => {
-    console.error('Request error:', error);
-    return Promise.reject(error);
-  }
-);
-
-// Add response interceptor for debugging
-api.interceptors.response.use(
-  (response) => {
-    console.log('Response received:', response.status);
-    return response;
-  },
-  (error) => {
-    console.error('Response error:', error);
-    if (error.response) {
-      console.error('Error response data:', error.response.data);
-      console.error('Error response status:', error.response.status);
-      console.error('Error response headers:', error.response.headers);
-    }
-    return Promise.reject(error);
-  }
-); 
+}); 

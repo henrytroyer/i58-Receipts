@@ -1,41 +1,65 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-
-interface User {
-  uid: string;
-  email: string | null;
-}
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import type { User } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth, signInWithGoogle, signOutUser } from '../firebase';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  error: string | null;
+  signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  loading: true,
-  error: null
-});
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error] = useState<string | null>(null);
 
   useEffect(() => {
-    // TODO: Implement actual authentication logic
-    // For now, we'll just set a mock user
-    setUser({
-      uid: 'mock-user-id',
-      email: 'user@example.com'
+    const unsubscribe = onAuthStateChanged(auth, (user: User | null) => {
+      setUser(user);
+      setLoading(false);
     });
-    setLoading(false);
+
+    return () => unsubscribe();
   }, []);
 
+  const signIn = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      console.error('Sign in error:', error);
+      throw error;
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      await signOutUser();
+    } catch (error) {
+      console.error('Sign out error:', error);
+      throw error;
+    }
+  };
+
+  const value = {
+    user,
+    loading,
+    signIn,
+    signOut,
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, error }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

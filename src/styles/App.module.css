@@ -5,18 +5,25 @@
 }
 
 .mainContent {
-  flex: 1;
-  padding: 2rem 1rem;
-  max-width: 1200px;
-  margin: 0 auto;
-  width: 100%;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
 }
 
-@media (max-width: 768px) {
+@media (min-width: 900px) {
+  .mainContent {
+    padding: 2rem 1rem;
+  }
+}
+
+@media (max-width: 900px) {
   .appContainer {
     flex-direction: column;
   }
+  
   .mainContent {
-    padding: 1rem 0.5rem;
+    padding: 0;
+    padding-top: 56px; /* Offset for AppBar height on mobile */
+    margin: 0;
   }
 } 

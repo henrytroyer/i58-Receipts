@@ -1,12 +1,13 @@
 .sidebar {
   width: 220px;
-  background: #232946;
-  color: #fff;
+  background: #f0f8ff;
+  color: #333;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   padding: 2rem 1rem;
   min-height: 100vh;
+  border-right: 1px solid #e0e8f0;
 }
 
 .logo {
@@ -25,48 +26,29 @@
 
 .navList li {
   margin-bottom: 1.2rem;
+  border: 1px solid #e0e8f0;
+  border-radius: 8px;
+  padding: 0;
 }
 
 .navList a {
-  color: #fff;
+  color: #333;
   text-decoration: none;
   font-size: 1.1rem;
   padding: 0.5rem 1rem;
-  border-radius: 6px;
+  border-radius: 8px;
   display: block;
   transition: background 0.2s, color 0.2s;
+  border: none;
+  margin: 0;
 }
 
 .navList a:hover {
-  background: #e8eefd;
-  color: #232946;
+  background: #e6f3ff;
+  color: #2d5a8a;
 }
 
 .active {
-  background: #3b6ea5;
-  color: #fff !important;
-}
-
-@media (max-width: 768px) {
-  .sidebar {
-    flex-direction: row;
-    width: 100%;
-    min-height: unset;
-    padding: 0.5rem 0.5rem;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .logo {
-    margin-bottom: 0;
-    font-size: 1.2rem;
-  }
-  .navList {
-    display: flex;
-    flex-direction: row;
-    width: auto;
-  }
-  .navList li {
-    margin-bottom: 0;
-    margin-right: 1rem;
-  }
+  background: #d4e6ff;
+  color: #1e4a7a !important;
 } 

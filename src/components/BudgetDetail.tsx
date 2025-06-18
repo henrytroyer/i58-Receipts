@@ -3,12 +3,9 @@ import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import styles from '../styles/BudgetDetail.module.css';
 import BudgetProgressBar from './BudgetProgressBar';
-import { getCurrentDate } from '../utils/budget';
+import { getCurrentDate, getMonthStartEnd } from '../utils/budget';
 import { useGlobalState } from '../contexts/GlobalStateContext';
 import { API_BASE_URL } from '../config';
-
-const BLUE = '#232946';
-const LIGHT = '#e8eefd';
 
 interface BudgetSummary {
   totalSpent: number;
@@ -23,17 +20,6 @@ interface BudgetSummary {
 interface CategoryLimit {
   [category: string]: number;
 }
-
-const getMonthStartEnd = (date: Date) => {
-  const start = new Date(date.getFullYear(), date.getMonth(), 1);
-  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
-    start,
-    end
-  };
-};
 
 const BudgetDetail = () => {
   const { budgetName = '' } = useParams<{ budgetName: string }>();
@@ -73,7 +59,7 @@ const BudgetDetail = () => {
   
   // Year-to-date spending for all categories (current budget year only)
   const overallYearToDateSpent = summary.categoryYearToDateTotals
-    ? Object.values(summary.categoryYearToDateTotals).reduce((a, b) => a + (Number(b) || 0), 0)
+    ? Object.values(summary.categoryYearToDateTotals).reduce((a, b) => Number(a) + Number(b), 0)
     : 0;
 
   return (
@@ -83,20 +69,26 @@ const BudgetDetail = () => {
         <div className={styles.summary}>
           <div className={styles.summaryItem}>
             <span>This Month</span>
-            <span className={styles.amount}>€{overallSpent.toFixed(2)}</span>
-            <span className={styles.limit}>of €{totalLimit.toFixed(2)}</span>
+            <span className={styles.amount}>€{Number(overallSpent).toFixed(2)}</span>
+            <span className={styles.limit}>of €{Number(totalLimit).toFixed(2)}</span>
           </div>
           <div className={styles.summaryItem}>
             <span>Year to Date</span>
-            <span className={styles.amount}>€{overallYearToDateSpent.toFixed(2)}</span>
+            <span className={styles.amount}>€{Number(overallYearToDateSpent).toFixed(2)}</span>
           </div>
         </div>
       </div>
 
       <div className={styles.progressList}>
-        {Object.entries(categoryLimits).map(([cat, limit]) => {
+        {Object.entries(categoryLimits).map(([cat]) => {
           const spent = summary.budgetCategoryTotals?.[budgetName]?.[cat] || 0;
           const snapshotLimit = summary.categoryLimits?.[cat] ?? 0;
+          // Calculate overall budget status for this budget
+          const overallBudgetStatus = {
+            isOver: overallSpent > totalLimit,
+            totalSpent: overallSpent,
+            totalLimit: totalLimit
+          };
           return (
             <BudgetProgressBar
               key={cat}
@@ -105,13 +97,15 @@ const BudgetDetail = () => {
               limit={snapshotLimit}
               startDate={startDate}
               endDate={endDate}
+              isCategory
+              overallBudgetStatus={overallBudgetStatus}
             />
           );
         })}
         {/* Overall bar */}
         <BudgetProgressBar
           name="Overall"
-          spent={Object.values(summary.budgetCategoryTotals?.[budgetName] || {}).reduce((a, b) => a + (Number(b) || 0), 0)}
+          spent={Object.values(summary.budgetCategoryTotals?.[budgetName] || {}).reduce((a, b) => Number(a) + Number(b), 0)}
           limit={totalLimit}
           startDate={startDate}
           endDate={endDate}
