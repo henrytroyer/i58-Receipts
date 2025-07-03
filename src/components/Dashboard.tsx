@@ -24,26 +24,68 @@ const BLUE = '#232946';
 const RED = '#e63946';
 
 const Dashboard = () => {
-  const { loading: globalLoading, error: globalError, testDate, summary, budgetLimits } = useGlobalState();
-  const [expanded, setExpanded] = useState<{ [budget: string]: boolean }>({});
+  const { loading: globalLoading, error: globalError, testDate, summary, budgetLimits, userSettings } = useGlobalState();
+  const [expanded, setExpanded] = useState<{ [budgetId: string]: boolean }>({});
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({ open: false, message: '' });
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-  // Get budget data from budgetLimits (faster than summary)
-  const budgetData = budgetLimits ? Object.entries(budgetLimits).map(([budgetName, budget]) => ({
-    name: budgetName,
+  // Get budget data from budgetLimits (faster than summary) - now using Budget IDs
+  const budgetData = budgetLimits ? Object.entries(budgetLimits).map(([budgetId, budget]) => ({
+    budgetId,
+    name: budget.displayName || budgetId, // Use display name for UI, fallback to ID
+    displayName: budget.displayName || budgetId,
+    region: budget.region,
+    subRegion: budget.subRegion,
+    // Create a full display name with region/sub-region info
+    fullDisplayName: budget.displayName 
+      ? `${budget.displayName} (${budget.region}${budget.subRegion && budget.subRegion !== budget.displayName ? ` - ${budget.subRegion}` : ''})`
+      : budgetId,
     limit: budget.total,
     categories: budget.categories || {}
   })) : [];
 
-  // Get spending data from summary
+  // Debug logging
+  console.log('Dashboard - budgetLimits:', budgetLimits);
+  console.log('Dashboard - budgetData:', budgetData);
+  console.log('Dashboard - userSettings:', userSettings);
+
+  // Temporary fallback: if no budgets with Budget IDs, try using budget names as keys
+  const fallbackBudgetData = !budgetData.length && budgetLimits ? Object.entries(budgetLimits).map(([budgetName, budget]) => ({
+    budgetId: budgetName, // Use budget name as ID for now
+    name: budgetName,
+    displayName: budgetName,
+    region: budget.region || 'Unknown',
+    subRegion: budget.subRegion || budgetName,
+    fullDisplayName: `${budgetName} (${budget.region || 'Unknown'}${budget.subRegion && budget.subRegion !== budgetName ? ` - ${budget.subRegion}` : ''})`,
+    limit: budget.total,
+    categories: budget.categories || {}
+  })) : [];
+
+  const finalBudgetData = budgetData.length > 0 ? budgetData : fallbackBudgetData;
+
+  // Filter budgets based on user's selected sub-regions
+  const getFilteredBudgetData = () => {
+    if (!userSettings?.subRegions || userSettings.subRegions.length === 0) {
+      // If no sub-regions are selected, show all budgets (fallback behavior)
+      return finalBudgetData;
+    }
+
+    // Filter budgets to only show those that belong to the user's selected sub-regions
+    return finalBudgetData.filter(budget => {
+      return budget.subRegion && userSettings.subRegions.includes(budget.subRegion);
+    });
+  };
+
+  const filteredBudgetData = getFilteredBudgetData();
+
+  // Get spending data from summary - now using Budget IDs
   const spendingData = summary?.data?.spending || {};
 
   // Calculate budget progress
-  const budgetProgress = budgetData.map(budget => {
-    const spent = spendingData[budget.name]?.total || 0;
+  const budgetProgress = filteredBudgetData.map(budget => {
+    const spent = spendingData[budget.budgetId]?.total || 0;
     const remaining = budget.limit - spent;
     const percentage = budget.limit > 0 ? (spent / budget.limit) * 100 : 0;
     
@@ -62,20 +104,20 @@ const Dashboard = () => {
   // Calculate donor borrowed map for each budget (expanded view)
   const donorBorrowedMaps: Record<string, ReturnType<typeof getDonorBorrowedMap>> = {};
   if (summary?.data?.spending && Object.keys(summary.data.spending).length > 0) {
-    for (const budget of budgetData) {
-      const spending = summary.data.spending[budget.name]?.categories || {};
+    for (const budget of filteredBudgetData) {
+      const spending = summary.data.spending[budget.budgetId]?.categories || {};
       const limits = budget.categories || {};
-      donorBorrowedMaps[budget.name] = getDonorBorrowedMap(spending, limits);
+      donorBorrowedMaps[budget.budgetId] = getDonorBorrowedMap(spending, limits);
     }
   }
 
   // Calculate proportional borrowed map for each budget (expanded view)
   const proportionalBorrowedMaps: Record<string, ReturnType<typeof getProportionalBorrowedMap>> = {};
   if (summary?.data?.spending && Object.keys(summary.data.spending).length > 0) {
-    for (const budget of budgetData) {
-      const spending = summary.data.spending[budget.name]?.categories || {};
+    for (const budget of filteredBudgetData) {
+      const spending = summary.data.spending[budget.budgetId]?.categories || {};
       const limits = budget.categories || {};
-      proportionalBorrowedMaps[budget.name] = getProportionalBorrowedMap(spending, limits);
+      proportionalBorrowedMaps[budget.budgetId] = getProportionalBorrowedMap(spending, limits);
     }
   }
 
@@ -188,13 +230,24 @@ const Dashboard = () => {
         <Typography variant="h6" color={BLUE} fontWeight={600} mb={2} sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
           Budgets
         </Typography>
+        {/* Show helpful message about sub-region filtering */}
+        {userSettings?.subRegions && userSettings.subRegions.length > 0 && (
+          <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+            Showing budgets for: {userSettings.subRegions.join(', ')}
+          </Typography>
+        )}
+        {userSettings?.subRegions && userSettings.subRegions.length > 0 && filteredBudgetData.length === 0 && Object.keys(budgetLimits || {}).length > 0 && (
+          <Typography variant="caption" color="warning.main" sx={{ mb: 2, display: 'block' }}>
+            No budgets available for your selected sub-regions. Please update your settings.
+          </Typography>
+        )}
         <Card sx={{ background: 'white', borderRadius: 3, boxShadow: '0 2px 8px rgba(35,41,70,0.06)', p: 0, overflow: 'hidden' }}>
           {budgetProgress.map((budget, idx) => {
             const overSpent = budget.spent > budget.limit;
-            const isExpanded = !!expanded[budget.name];
+            const isExpanded = !!expanded[budget.budgetId];
             
             return (
-              <Box key={budget.name} sx={{
+              <Box key={budget.budgetId} sx={{
                 borderBottom: idx !== budgetProgress.length - 1 ? '1px solid #f0f1f6' : 'none',
                 px: 2,
                 pt: 1.2,
@@ -205,7 +258,7 @@ const Dashboard = () => {
                 <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <BudgetProgressBar
-                      name={budget.name}
+                      name={budget.fullDisplayName}
                       spent={isSpendingLoading ? 0 : budget.spent}
                       limit={budget.limit}
                       startDate={getMonthStartEnd(currentDate).startDate}
@@ -225,7 +278,7 @@ const Dashboard = () => {
                       <IconButton
                         onClick={() => setExpanded(e => {
                           const newState: typeof expanded = {};
-                          if (!e[budget.name]) newState[budget.name] = true;
+                          if (!e[budget.budgetId]) newState[budget.budgetId] = true;
                           return newState;
                         })}
                         size="small"
@@ -240,11 +293,11 @@ const Dashboard = () => {
                 <Collapse in={isExpanded} timeout="auto" unmountOnExit sx={{ width: '100%' }}>
                   <Box sx={{ pl: 4, pr: 2, py: 1 }}>
                     {Object.entries(budget.categories).map(([category, limit]) => {
-                      const spent = spendingData[budget.name]?.categories?.[category] || 0;
+                      const spent = spendingData[budget.budgetId]?.categories?.[category] || 0;
                       const limitValue = typeof limit === 'number' ? limit : 0;
                       
                       // Calculate overall budget status for this budget
-                      const overallBudgetSpent = spendingData[budget.name]?.total || 0;
+                      const overallBudgetSpent = spendingData[budget.budgetId]?.total || 0;
                       const overallBudgetLimit = budget.limit;
                       const overallBudgetStatus = {
                         isOver: overallBudgetSpent > overallBudgetLimit,
@@ -253,7 +306,7 @@ const Dashboard = () => {
                       };
                       
                       // Proportional borrowed data
-                      const proportionalData = proportionalBorrowedMaps[budget.name]?.[category];
+                      const proportionalData = proportionalBorrowedMaps[budget.budgetId]?.[category];
                       
                       // Only pass proportional data if the category is actually borrowing
                       const proportionalBorrowed = proportionalData?.borrowed && proportionalData.borrowed > 0 

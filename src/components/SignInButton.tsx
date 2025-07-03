@@ -2,9 +2,11 @@ import React from 'react';
 import { Button, Avatar, Box, Typography, Menu, MenuItem, IconButton } from '@mui/material';
 import { Google as GoogleIcon, AccountCircle } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { useGlobalState } from '../contexts/GlobalStateContext';
 
 const SignInButton: React.FC = () => {
   const { user, loading, signIn, signOut } = useAuth();
+  const { refreshUserSettings } = useGlobalState();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -18,11 +20,20 @@ const SignInButton: React.FC = () => {
   const handleSignOut = async () => {
     try {
       await signOut();
+      localStorage.removeItem('userEmail');
       handleMenuClose();
     } catch (error) {
       console.error('Error signing out:', error);
     }
   };
+
+  // Load user settings when user signs in
+  React.useEffect(() => {
+    if (user?.email) {
+      localStorage.setItem('userEmail', user.email);
+      refreshUserSettings(user.email);
+    }
+  }, [user, refreshUserSettings]);
 
   if (loading) {
     return (

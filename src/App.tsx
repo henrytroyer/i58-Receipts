@@ -9,6 +9,8 @@ import AdminReceiptForm from './components/AdminReceiptForm';
 import EditReceiptsPage from './components/EditReceiptsPage';
 import MobileHeader from './components/MobileHeader';
 import ProtectedRoute from './components/ProtectedRoute';
+import Settings from './components/Settings';
+import PettyCash from './components/PettyCash';
 import styles from './styles/App.module.css';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
@@ -48,6 +50,12 @@ function App() {
                   <Route path="/budgets/:budgetName" element={<BudgetDetail />} />
                   <Route path="/submit-receipt" element={<ReceiptForm />} />
                   <Route path="/edit-receipts" element={<EditReceiptsPage />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/petty-cash" element={
+                    <ProtectedRoute requiredDomain="i58global.org">
+                      <PettyCash />
+                    </ProtectedRoute>
+                  } />
                   <Route path="/admin-receipt" element={
                     <ProtectedRoute requiredDomain="i58global.org">
                       <AdminReceiptForm />

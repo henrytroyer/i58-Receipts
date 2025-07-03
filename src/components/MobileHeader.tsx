@@ -20,7 +20,9 @@ import {
   Add as AddIcon,
   AdminPanelSettings as AdminIcon,
   BugReport as TestIcon,
-  Edit as EditIcon
+  Edit as EditIcon,
+  Settings as SettingsIcon,
+  AccountBalance as PettyCashIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -30,6 +32,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/submit-receipt': 'Submit Receipt',
   '/edit-receipts': 'Edit Previous Receipts',
+  '/settings': 'Settings',
+  '/petty-cash': 'Petty Cash',
   '/admin-receipt': 'Admin Receipt Entry',
   '/test-mode': 'Test Mode',
   '/budgets': 'Budgets',
@@ -49,6 +53,8 @@ const MobileHeader: React.FC = () => {
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
     { text: 'Submit Receipt', icon: <AddIcon />, path: '/submit-receipt' },
     ...(user ? [{ text: 'Edit Previous Receipts', icon: <EditIcon />, path: '/edit-receipts' }] : []),
+    ...(user ? [{ text: 'Settings', icon: <SettingsIcon />, path: '/settings' }] : []),
+    ...(user && user.email?.endsWith('@i58global.org') ? [{ text: 'Petty Cash', icon: <PettyCashIcon />, path: '/petty-cash' }] : []),
     { text: 'Admin Receipt Entry', icon: <AdminIcon />, path: '/admin-receipt' },
     { text: 'Test Mode', icon: <TestIcon />, path: '/test-mode' }
   ];

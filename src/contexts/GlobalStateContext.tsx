@@ -24,6 +24,11 @@ interface Summary {
     budgetLimits: Record<string, {
       total: number;
       categories: Record<string, number>;
+      budgetId?: string;
+      displayName?: string;
+      region?: string;
+      subRegion?: string;
+      enhancedName?: string;
     }>;
     spending: Record<string, {
       total: number;
@@ -64,17 +69,41 @@ interface GlobalState {
   error: ErrorState;
   summary: Summary | null;
   testDate?: string | null;
-  budgetLimits?: Record<string, { total: number; categories: Record<string, number> }>;
+  budgetLimits?: Record<string, { 
+    total: number; 
+    categories: Record<string, number>;
+    budgetId?: string;
+    displayName?: string;
+    region?: string;
+    subRegion?: string;
+    enhancedName?: string;
+  }>;
   cache: CacheState;
+  userSettings: {
+    email: string;
+    region: string;
+    subRegions: string[];
+    pettyCashFunds: string[];
+    budgetIds?: string[];
+    isBanned: boolean;
+    lastLogin: string;
+    lastSync: string;
+  } | null;
   setBudgets: (budgets: any[]) => void;
   setCategories: (categories: any[]) => void;
   setCards: (cards: any[]) => void;
   setLoading: (loading: Partial<LoadingState>) => void;
   setError: (error: Partial<ErrorState>) => void;
   setSummary: (summary: Summary | null) => void;
+  setUserSettings: (settings: any) => void;
+  refreshUserSettings: (userEmail?: string) => Promise<void>;
   refreshSummary: () => Promise<void>;
   clearCache: () => void;
   dispatch: React.Dispatch<any>;
+  // Helper functions for Budget ID system
+  getFilteredBudgets: () => any[];
+  getBudgetById: (budgetId: string) => any | null;
+  getFilteredCategories: () => any[];
 }
 
 // Helper function to get current month key
@@ -113,15 +142,21 @@ const initialState: GlobalState = {
     categories: null,
     cards: null
   },
+  userSettings: null,
   setBudgets: () => {},
   setCategories: () => {},
   setCards: () => {},
   setLoading: () => {},
   setError: () => {},
   setSummary: () => {},
+  setUserSettings: () => {},
+  refreshUserSettings: async () => {},
   refreshSummary: async () => {},
   clearCache: () => {},
   dispatch: () => {},
+  getFilteredBudgets: () => [],
+  getBudgetById: () => null,
+  getFilteredCategories: () => [],
 };
 
 function globalStateReducer(state: GlobalState, action: any): GlobalState {
@@ -145,6 +180,8 @@ function globalStateReducer(state: GlobalState, action: any): GlobalState {
       return { ...state, budgetLimits: action.payload };
     case 'SET_CACHE':
       return { ...state, cache: { ...state.cache, ...action.payload } };
+    case 'SET_USER_SETTINGS':
+      return { ...state, userSettings: action.payload };
     case 'CLEAR_CACHE':
       return { 
         ...state, 
@@ -164,7 +201,7 @@ const GlobalStateContext = createContext<GlobalState | undefined>(undefined);
 
 export function GlobalStateProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(globalStateReducer, initialState);
-
+  
   const setLoading = (newLoading: Partial<LoadingState>) => {
     dispatch({ type: 'SET_LOADING', payload: newLoading });
   };
@@ -173,8 +210,77 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_ERROR', payload: newError });
   };
 
+  const setUserSettings = (settings: any) => {
+    dispatch({ type: 'SET_USER_SETTINGS', payload: settings });
+  };
+
+  const refreshUserSettings = async (userEmail?: string) => {
+    try {
+      // If no email provided, try to get from localStorage as fallback
+      const email = userEmail || localStorage.getItem('userEmail');
+      if (!email) {
+        console.log('No user email found, clearing user settings');
+        setUserSettings(null);
+        return;
+      }
+
+      const response = await api.get('', { 
+        params: { 
+          action: 'getUserSettings',
+          email: email
+        } 
+      });
+
+      if (response.data.success && response.data.data) {
+        console.log('Loaded user settings:', response.data.data);
+        setUserSettings(response.data.data);
+      } else {
+        console.error('Failed to load user settings:', response.data.error);
+        setUserSettings(null);
+      }
+    } catch (error) {
+      console.error('Error refreshing user settings:', error);
+      setUserSettings(null);
+    }
+  };
+
   const clearCache = () => {
     dispatch({ type: 'CLEAR_CACHE' });
+  };
+
+  // Helper function to get budgets filtered by user settings
+  const getFilteredBudgets = (): any[] => {
+    if (!state.userSettings) return state.budgets;
+    
+    // If user has specific budget IDs selected, filter by those
+    if (state.userSettings.budgetIds && state.userSettings.budgetIds.length > 0) {
+      return state.budgets.filter(budget => 
+        state.userSettings!.budgetIds!.includes(budget.budgetId)
+      );
+    }
+    
+    // Otherwise, filter by region and sub-regions (backward compatibility)
+    return state.budgets.filter(budget => 
+      budget.region === state.userSettings!.region &&
+      state.userSettings!.subRegions.includes(budget.subRegion)
+    );
+  };
+
+  // Helper function to get budget by ID
+  const getBudgetById = (budgetId: string): any | null => {
+    return state.budgets.find(budget => budget.budgetId === budgetId) || null;
+  };
+
+  // Helper function to get categories filtered by user's selected budgets
+  const getFilteredCategories = (): any[] => {
+    if (!state.userSettings) return state.categories;
+    
+    const filteredBudgets = getFilteredBudgets();
+    const selectedBudgetIds = filteredBudgets.map(budget => budget.budgetId);
+    
+    return state.categories.filter(category => 
+      selectedBudgetIds.includes(category.budgetId)
+    );
   };
 
   // Function to refresh summary data (spending data only)
@@ -191,6 +297,13 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
       
       if (spendingResponse.data.success && spendingResponse.data.data) {
         const spendingData = spendingResponse.data.data;
+        
+        // Debug logging
+        console.log('GlobalStateContext - spendingResponse.data:', spendingResponse.data);
+        console.log('GlobalStateContext - spendingData:', spendingData);
+        console.log('GlobalStateContext - spending keys:', Object.keys(spendingData.spending || {}));
+        
+        // Use existing budget limits from state
         const currentBudgetLimits = state.budgetLimits || {};
         
         // Create updated summary with new spending data
@@ -249,6 +362,11 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
           
           if (staticResponse.data.success && staticResponse.data.data) {
             const staticData = staticResponse.data.data;
+            
+            // Debug logging
+            console.log('GlobalStateContext - staticResponse.data:', staticResponse.data);
+            console.log('GlobalStateContext - staticData:', staticData);
+            console.log('GlobalStateContext - budgetLimits keys:', Object.keys(staticData.budgetLimits || {}));
             
             // Set budget limits immediately
             dispatch({ type: 'SET_BUDGET_LIMITS', payload: staticData.budgetLimits || {} });
@@ -408,6 +526,11 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
             const staticData = await staticDataPromise;
             const currentBudgetLimits = staticData?.budgetLimits || {};
             
+            // Debug logging
+            console.log('GlobalStateContext - spendingResponse.data:', spendingResponse.data);
+            console.log('GlobalStateContext - spendingData:', spendingData);
+            console.log('GlobalStateContext - spending keys:', Object.keys(spendingData.spending || {}));
+            
             // Create summary with spending data and budget limits
             const summaryData = {
               success: true,
@@ -443,7 +566,17 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
   }, [state.testDate]); // Removed dispatch from dependencies to prevent re-renders
 
   return (
-    <GlobalStateContext.Provider value={{ ...state, refreshSummary, clearCache, dispatch }}>
+    <GlobalStateContext.Provider value={{ 
+      ...state, 
+      setUserSettings, 
+      refreshUserSettings, 
+      refreshSummary, 
+      clearCache, 
+      dispatch,
+      getFilteredBudgets,
+      getBudgetById,
+      getFilteredCategories
+    }}>
       {children}
     </GlobalStateContext.Provider>
   );

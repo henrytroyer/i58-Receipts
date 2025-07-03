@@ -29,9 +29,34 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import { Chip } from '@mui/material';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select from '@mui/material/Select';
+
+// A controlled palette for better aesthetics
+const colorPalette = [
+  '#3b6ea5', '#4e8d7c', '#a53b5e', '#a56e3b',
+  '#3ba59a', '#8d4e7c', '#7ca53b', '#6e3ba5',
+  '#5a8b9e', '#9e5a8b', '#8b9e5a', '#5a9e8b'
+];
+
+const getColorFromString = (str: string | undefined) => {
+  if (!str) {
+    return '#ccc'; // Default color for undefined strings
+  }
+  // Simple hash function to pick a color from the palette
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    hash = hash & hash; 
+  }
+  const index = Math.abs(hash) % colorPalette.length;
+  return colorPalette[index];
+};
 
 const AdminReceiptForm: React.FC = () => {
-  const { summary, cards } = useGlobalState();
+  const { cards, userSettings, budgetLimits } = useGlobalState();
   const { user } = useAuth();
   const [amount, setAmount] = useState('');
   const [vendor, setVendor] = useState('');
@@ -58,6 +83,33 @@ const AdminReceiptForm: React.FC = () => {
     data: any;
     timestamp: number;
   }>>([]);
+
+  const getFilteredBudgetData = () => {
+    if (!userSettings?.subRegions || userSettings.subRegions.length === 0) {
+      return Object.entries(budgetLimits || {});
+    }
+    const filteredBudgets = Object.entries(budgetLimits || {}).filter(([_budgetId, budgetData]) => {
+      return budgetData.subRegion && userSettings.subRegions.includes(budgetData.subRegion);
+    });
+    return filteredBudgets;
+  };
+
+  const finalBudgetOptions = getFilteredBudgetData().map(([budgetId, budgetData]) => ({
+    budgetId,
+    displayName: budgetData.displayName || budgetId,
+    region: budgetData.region,
+    subRegion: budgetData.subRegion,
+    fullDisplayName: budgetData.displayName
+      ? `${budgetData.displayName} (${budgetData.region}${budgetData.subRegion && budgetData.subRegion !== budgetData.displayName ? ` - ${budgetData.subRegion}` : ''})`
+      : budgetId
+  }));
+
+  const getAvailableCategories = () => {
+    if (!budget || !budgetLimits || !budgetLimits[budget]) {
+      return [];
+    }
+    return Object.keys(budgetLimits[budget].categories || {});
+  };
 
   // Set today's date as default on mount
   useEffect(() => {
@@ -159,6 +211,8 @@ const AdminReceiptForm: React.FC = () => {
     setSuccess(false);
     setLoading(true);
 
+    const selectedBudgetName = finalBudgetOptions.find(b => b.budgetId === budget)?.displayName || '';
+
     // Store the current form data for submission
     const currentFormData = {
       amount,
@@ -210,7 +264,8 @@ const AdminReceiptForm: React.FC = () => {
         amount: (parseFloat(amount) * 100).toString(), // Convert euros to cents for backend
         date,
         vendor,
-        budget,
+        budgetId: budget, // Use Budget ID instead of budget name
+        budget: selectedBudgetName, // Include budget name
         category,
         card,
         description,
@@ -302,13 +357,6 @@ const AdminReceiptForm: React.FC = () => {
     setPdfIsNative(false);
     setFileType('');
   };
-
-  // Get budget options from summary
-  const budgetOptions = summary?.data?.budgetLimits ? Object.keys(summary.data.budgetLimits) : [];
-  // Get category options for selected budget
-  const categoryOptions = budget && summary?.data?.budgetLimits?.[budget]?.categories ? Object.keys(summary.data.budgetLimits[budget].categories) : [];
-  // Get card options from summary
-  const cardOptions = cards ? cards.map((c: any) => c.card) : [];
 
   // Format as cents to euros as user types
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -405,36 +453,84 @@ const AdminReceiptForm: React.FC = () => {
           />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField
-            select
-            label="Budget"
-            value={budget}
-            onChange={e => {
-              setBudget(e.target.value);
-              setCategory('');
-            }}
-            required
-            fullWidth
-            InputLabelProps={{ shrink: true }}
-          >
-            {budgetOptions.map(b => (
-              <MenuItem key={b} value={b}>{b}</MenuItem>
-            ))}
-          </TextField>
+          <FormControl fullWidth>
+            <InputLabel id="budget-select-label">Budget</InputLabel>
+            <Select
+              labelId="budget-select-label"
+              value={budget}
+              label="Budget"
+              onChange={(e) => setBudget(e.target.value)}
+              renderValue={(selectedValue) => {
+                const selectedOption = finalBudgetOptions.find((b: { budgetId: string; displayName: string }) => b.budgetId === selectedValue);
+                return selectedOption ? selectedOption.displayName : '';
+              }}
+            >
+              {finalBudgetOptions.map((option: {budgetId: string, displayName: string, region?: string, subRegion?: string}) => (
+                <MenuItem key={option.budgetId} value={option.budgetId}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                    <Typography variant="body1">
+                      {option.displayName}
+                    </Typography>
+                    <Stack direction="column" alignItems="flex-end">
+                      {option.region && (
+                        <Chip
+                          label={option.region}
+                          size="small"
+                          sx={{ 
+                            height: 'auto', 
+                            fontSize: '0.6rem', 
+                            lineHeight: 1.2,
+                            backgroundColor: getColorFromString(option.region),
+                            color: 'white'
+                          }}
+                        />
+                      )}
+                      {option.subRegion && option.region !== option.subRegion && (
+                        <Chip
+                          label={option.subRegion}
+                          size="small"
+                          sx={{ 
+                            height: 'auto', 
+                            fontSize: '0.6rem', 
+                            lineHeight: 1.2, 
+                            mt: 0.3,
+                            backgroundColor: getColorFromString(option.subRegion),
+                            color: 'white'
+                          }}
+                        />
+                      )}
+                    </Stack>
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {(() => {
+            const selectedOption = finalBudgetOptions.find((b: { budgetId: string; region?: string; subRegion?: string }) => b.budgetId === budget);
+            if (selectedOption) {
+              return (
+                <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                  {selectedOption.region && <Chip label={selectedOption.region} size="small" sx={{backgroundColor: getColorFromString(selectedOption.region), color: 'white'}} />}
+                  {selectedOption.subRegion && selectedOption.region !== selectedOption.subRegion && <Chip label={selectedOption.subRegion} size="small" sx={{backgroundColor: getColorFromString(selectedOption.subRegion), color: 'white'}} />}
+                </Stack>
+              );
+            }
+            return null;
+          })()}
         </Grid>
         <Grid item xs={12} sm={6}>
           <TextField
             select
+            fullWidth
             label="Category"
             value={category}
-            onChange={e => setCategory(e.target.value)}
-            required
-            fullWidth
+            onChange={(e) => setCategory(e.target.value)}
             disabled={!budget}
-            InputLabelProps={{ shrink: true }}
           >
-            {categoryOptions.map(c => (
-              <MenuItem key={c} value={c}>{c}</MenuItem>
+            {getAvailableCategories().map((cat) => (
+              <MenuItem key={cat} value={cat}>
+                {cat}
+              </MenuItem>
             ))}
           </TextField>
         </Grid>
@@ -448,8 +544,8 @@ const AdminReceiptForm: React.FC = () => {
             InputLabelProps={{ shrink: true }}
           >
             <MenuItem value="">None</MenuItem>
-            {cardOptions.map((c: string) => (
-              <MenuItem key={c} value={c}>{c}</MenuItem>
+            {cards.map((c: any) => (
+              <MenuItem key={c.card} value={c.card}>{c.card}</MenuItem>
             ))}
           </TextField>
         </Grid>

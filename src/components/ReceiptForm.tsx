@@ -14,7 +14,8 @@ import {
   Grid,
   Container,
   Paper,
-  Autocomplete
+  Autocomplete,
+  Chip
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -31,6 +32,27 @@ import SignInButton from './SignInButton';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 
+// A controlled palette for better aesthetics
+const colorPalette = [
+  '#3b6ea5', '#4e8d7c', '#a53b5e', '#a56e3b',
+  '#3ba59a', '#8d4e7c', '#7ca53b', '#6e3ba5',
+  '#5a8b9e', '#9e5a8b', '#8b9e5a', '#5a9e8b'
+];
+
+const getColorFromString = (str: string | undefined) => {
+  if (!str) {
+    return '#ccc'; // Default color for undefined strings
+  }
+  // Simple hash function to pick a color from the palette
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    hash = hash & hash; 
+  }
+  const index = Math.abs(hash) % colorPalette.length;
+  return colorPalette[index];
+};
+
 interface FormData {
   amount: string;
   date: Date;
@@ -39,13 +61,29 @@ interface FormData {
   photo: File | null;
 }
 
+const convertFileToBase64 = async (file: File) => {
+  const isNative = file.type === 'application/pdf';
+  const fileType = file.type;
+  
+  return new Promise<{ base64: string; isNative: boolean; fileType: string }>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64Data = result.split(',')[1];
+      resolve({ base64: base64Data, isNative, fileType });
+    };
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+};
+
 export const ReceiptForm = () => {
-  const { categories, cards, loading: globalLoading, summary, budgetLimits, refreshSummary } = useGlobalState();
+  const { categories, cards, loading: globalLoading, summary, budgetLimits, userSettings } = useGlobalState();
   const { user, loading: authLoading } = useAuth();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Array<{
     id: string;
     status: 'submitting' | 'success' | 'error';
@@ -53,7 +91,7 @@ export const ReceiptForm = () => {
     timestamp: number;
   }>>([]);
   const [pendingSuccessfulSubmissions, setPendingSuccessfulSubmissions] = useState<Array<{
-    budget: string;
+    budgetId: string;
     category: string;
     amount: number;
   }>>([]);
@@ -69,21 +107,36 @@ export const ReceiptForm = () => {
   });
   const [amount, setAmount] = useState('');
 
-  // Get budget limits from the separate budgetLimits state (faster than summary)
+  // Filter budgets based on user's selected sub-regions
+  const getFilteredBudgetData = () => {
+    if (!userSettings?.subRegions || userSettings.subRegions.length === 0) {
+      // If no sub-regions are selected, show all budgets (fallback behavior)
+      return Object.entries(budgetLimits || {});
+    }
+
+    // Filter budgets to only show those that belong to the user's selected sub-regions
+    const filteredBudgets = Object.entries(budgetLimits || {}).filter(([_budgetId, budgetData]) => {
+      return budgetData.subRegion && userSettings.subRegions.includes(budgetData.subRegion);
+    });
+
+    return filteredBudgets;
+  };
+
+  // Get budget limits from the separate budgetLimits state (faster than summary) - now using Budget IDs
   const budgetLimit = budgetLimits?.[selectedBudget]?.total ?? 0;
   const categoryLimit = budgetLimits?.[selectedBudget]?.categories?.[selectedCategory] ?? 0;
 
-  // Use spending for actual spent amounts (from summary)
+  // Use spending for actual spent amounts (from summary) - now using Budget IDs
   const budgetSpent = summary?.data?.spending?.[selectedBudget]?.total ?? 0;
   const categorySpent = summary?.data?.spending?.[selectedBudget]?.categories?.[selectedCategory] ?? 0;
 
   // Calculate pending amounts from successful submissions that haven't been reflected in server data yet
   const pendingBudgetAmount = pendingSuccessfulSubmissions
-    .filter(sub => sub.budget === selectedBudget)
+    .filter(sub => sub.budgetId === selectedBudget)
     .reduce((sum, sub) => sum + sub.amount, 0);
   
   const pendingCategoryAmount = pendingSuccessfulSubmissions
-    .filter(sub => sub.budget === selectedBudget && sub.category === selectedCategory)
+    .filter(sub => sub.budgetId === selectedBudget && sub.category === selectedCategory)
     .reduce((sum, sub) => sum + sub.amount, 0);
 
   // Dynamically include the value in the amount field
@@ -124,46 +177,76 @@ export const ReceiptForm = () => {
     }
   }, []);
 
-  // Cache budget names and categories in localStorage when they load
+  // Cache budget IDs and categories in localStorage when they load
   useEffect(() => {
     if (budgetLimits && Object.keys(budgetLimits).length > 0) {
-      const budgetNames = Object.keys(budgetLimits);
-      localStorage.setItem('cachedBudgetNames', JSON.stringify(budgetNames));
+      const budgetEntries = Object.entries(budgetLimits);
+      const budgetOptions = budgetEntries.map(([budgetId, budgetData]) => ({
+        budgetId,
+        displayName: budgetData.displayName || budgetId
+      }));
+      localStorage.setItem('cachedBudgetOptions', JSON.stringify(budgetOptions));
       
       // Cache categories for each budget
       const budgetCategories: Record<string, string[]> = {};
-      Object.entries(budgetLimits).forEach(([budgetName, budget]) => {
-        budgetCategories[budgetName] = Object.keys(budget.categories || {});
+      budgetEntries.forEach(([budgetId, budgetData]) => {
+        budgetCategories[budgetId] = Object.keys(budgetData.categories || {});
       });
       localStorage.setItem('cachedBudgetCategories', JSON.stringify(budgetCategories));
     }
   }, [budgetLimits]);
 
-  // Get cached budget names and categories for immediate display
-  const getCachedBudgetNames = () => {
+  // Get cached budget options and categories for immediate display
+  const getCachedBudgetOptions = () => {
     try {
-      const cached = localStorage.getItem('cachedBudgetNames');
+      const cached = localStorage.getItem('cachedBudgetOptions');
       return cached ? JSON.parse(cached) : [];
     } catch {
       return [];
     }
   };
 
-  const getCachedBudgetCategories = (budgetName: string) => {
+  const getCachedBudgetCategories = (budgetId: string) => {
     try {
       const cached = localStorage.getItem('cachedBudgetCategories');
       if (!cached) return [];
       const budgetCategories = JSON.parse(cached);
-      return budgetCategories[budgetName] || [];
+      return budgetCategories[budgetId] || [];
     } catch {
       return [];
     }
   };
 
-  // Use cached data if API data is not available yet
-  const availableBudgetNames = Object.keys(budgetLimits || {}).length > 0 
-    ? Object.keys(budgetLimits || {}) 
-    : getCachedBudgetNames();
+  // Use filtered budget data based on user settings, with fallback to cached data
+  const availableBudgetOptions = getFilteredBudgetData().length > 0 
+    ? getFilteredBudgetData().map(([budgetId, budgetData]) => ({
+        budgetId,
+        displayName: budgetData.displayName || budgetId,
+        region: budgetData.region,
+        subRegion: budgetData.subRegion,
+        // Create a full display name with region/sub-region info
+        fullDisplayName: budgetData.displayName 
+          ? `${budgetData.displayName} (${budgetData.region}${budgetData.subRegion && budgetData.subRegion !== budgetData.displayName ? ` - ${budgetData.subRegion}` : ''})`
+          : budgetId
+      }))
+    : getCachedBudgetOptions();
+
+  // Debug logging
+  console.log('ReceiptForm - budgetLimits:', budgetLimits);
+  console.log('ReceiptForm - getFilteredBudgetData():', getFilteredBudgetData());
+  console.log('ReceiptForm - availableBudgetOptions:', availableBudgetOptions);
+  console.log('ReceiptForm - userSettings:', userSettings);
+
+  // Temporary fallback: if no budgets with Budget IDs, try using budget names as keys
+  const fallbackBudgetOptions = !availableBudgetOptions.length && budgetLimits ? Object.entries(budgetLimits).map(([budgetName, budgetData]) => ({
+    budgetId: budgetName, // Use budget name as ID for now
+    displayName: budgetName,
+    region: budgetData.region,
+    subRegion: budgetData.subRegion,
+    fullDisplayName: `${budgetName} (${budgetData.region || 'Unknown'}${budgetData.subRegion && budgetData.subRegion !== budgetName ? ` - ${budgetData.subRegion}` : ''})`
+  })) : [];
+
+  const finalBudgetOptions = availableBudgetOptions.length > 0 ? availableBudgetOptions : fallbackBudgetOptions;
 
   const availableCategories = selectedBudget && Object.keys(budgetLimits?.[selectedBudget]?.categories || {}).length > 0
     ? Object.keys(budgetLimits?.[selectedBudget]?.categories || {})
@@ -218,14 +301,14 @@ export const ReceiptForm = () => {
   // Validate budget and category against available data (only after data loads)
   useEffect(() => {
     if (budgetLimits && Object.keys(budgetLimits).length > 0) {
-      const availableBudgets = Object.keys(budgetLimits);
-      if (selectedBudget && !availableBudgets.includes(selectedBudget)) {
-        console.log('Clearing invalid budget:', selectedBudget, 'Available:', availableBudgets);
+      const availableBudgetIds = getFilteredBudgetData().map(([_budgetId]) => _budgetId);
+      if (selectedBudget && !availableBudgetIds.includes(selectedBudget)) {
+        console.log('Clearing invalid budget:', selectedBudget, 'Available:', availableBudgetIds);
         setSelectedBudget('');
         setSelectedCategory(''); // Clear category too since budget is invalid
       }
     }
-  }, [budgetLimits, selectedBudget]);
+  }, [budgetLimits, selectedBudget, userSettings?.subRegions]);
 
   // Format for display with euro symbol - treat input as cents
   const formatAmountDisplay = (value: string) => {
@@ -250,152 +333,100 @@ export const ReceiptForm = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
 
-    // Store the current form data for submission
-    const currentFormData = {
-      amount,
-      date: formData.date,
-      vendor: formData.vendor,
-      card: formData.card,
-      photo: formData.photo,
-      budget: selectedBudget,
-      category: selectedCategory
+    if (!selectedBudget || !selectedCategory || !amount || !formData.vendor || !formData.card) {
+      setError('Please fill in all required fields: Budget, Category, Amount, Vendor, and Card.');
+      return;
+    }
+
+    setError(null);
+    setSuccessMessage(null);
+
+    // Reset form fields immediately so user can start typing a new receipt
+    const currentAmount = amount;
+    const currentVendor = formData.vendor;
+    const currentPhoto = formData.photo;
+    
+    setAmount('');
+    setFormData(prev => ({ ...prev, vendor: '', photo: null }));
+
+    const submissionId = `${Date.now()}-${Math.random()}`;
+    let photoBase64: string | null = null;
+    let isNativeFile = false;
+    let fileType = '';
+
+    if (currentPhoto) {
+        try {
+            const result = await convertFileToBase64(currentPhoto);
+            photoBase64 = result.base64;
+            isNativeFile = result.isNative;
+            fileType = result.fileType;
+        } catch (err) {
+            setError('Failed to process the image file.');
+            return;
+        }
+    }
+    
+    const selectedBudgetName = finalBudgetOptions.find((b: { budgetId: string, displayName: string }) => b.budgetId === selectedBudget)?.displayName || '';
+
+    const submissionData = {
+        amount: currentAmount,
+        date: format(formData.date, 'yyyy-MM-dd'),
+        vendor: currentVendor,
+        budgetId: selectedBudget,
+        budget: selectedBudgetName,
+        category: selectedCategory,
+        card: formData.card,
+        description: '', // No description field in this form
+        monthlyExpense: false,
+        pdf: photoBase64,
+        pdfIsNative: isNativeFile,
+        fileType: fileType,
+        userEmail: user?.email || '',
+        userName: user?.displayName || user?.email || 'Unknown User',
     };
 
-    // Create a unique ID for this submission
-    const submissionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    
-    // Add submission to tracking
     setSubmissions(prev => [...prev, {
       id: submissionId,
       status: 'submitting',
-      data: currentFormData,
+      data: submissionData,
       timestamp: Date.now()
     }]);
 
-    // Immediately reset the form for better UX
-    setFormData(prev => ({
-      ...prev,
-      amount: '',
-      vendor: '',
-      photo: null,
-    }));
-    setAmount('');
-    
-    // Reset loading state immediately so user can submit another receipt
-    setLoading(false);
-
     try {
-      let photoBase64: string | null = null;
-      let pdfIsNative = false;
-      if (currentFormData.photo) {
-        pdfIsNative = currentFormData.photo.type === 'application/pdf';
-        const reader = new FileReader();
-        photoBase64 = await new Promise((resolve) => {
-          reader.onload = () => {
-            const result = reader.result as string;
-            const base64Data = result.split(',')[1];
-            resolve(base64Data);
-          };
-          reader.readAsDataURL(currentFormData.photo!);
+        const formDataToSend = new URLSearchParams();
+        formDataToSend.append('data', JSON.stringify(submissionData));
+        
+        console.log('Submitting form data:', submissionData);
+
+        const response = await axios.post(API_BASE_URL, formDataToSend, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         });
-      }
 
-      const formDataToSend = new URLSearchParams();
-      formDataToSend.append('data', JSON.stringify({
-        amount: (parseFloat(currentFormData.amount) / 100).toString(), // Convert cents to euros
-        date: format(currentFormData.date, 'yyyy-MM-dd'),
-        budget: currentFormData.budget,
-        category: currentFormData.category,
-        vendor: currentFormData.vendor,
-        card: currentFormData.card,
-        description: currentFormData.vendor, // Using vendor as description since we removed the description field
-        pdf: photoBase64,
-        pdfIsNative: pdfIsNative,
-        userEmail: user?.email || '',
-        userName: user?.displayName || user?.email || 'Unknown User'
-      }));
-
-      console.log('Submitting form data:', {
-        amount: currentFormData.amount,
-        date: format(currentFormData.date, 'yyyy-MM-dd'),
-        budget: currentFormData.budget,
-        category: currentFormData.category,
-        vendor: currentFormData.vendor,
-        card: currentFormData.card,
-        hasPhoto: !!photoBase64
-      });
-
-      const response = await axios.post(API_BASE_URL, formDataToSend.toString(), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json',
-        },
-        withCredentials: false,
-        maxRedirects: 5,
-        validateStatus: (status) => status >= 200 && status < 300,
-      });
-
-      console.log('Response:', response);
-
-      if (response.data.success) {
-        // Update submission status to success
-        setSubmissions(prev => prev.map(sub => 
-          sub.id === submissionId ? { ...sub, status: 'success' } : sub
-        ));
-        
-        // Add to pending successful submissions for immediate budget progress update
-        setPendingSuccessfulSubmissions(prev => [...prev, {
-          budget: currentFormData.budget,
-          category: currentFormData.category,
-          amount: parseFloat(currentFormData.amount) / 100 // Convert cents to euros
-        }]);
-        
-        // Trigger background refresh of budget data
-        try {
-          await refreshSummary();
-          // Clear pending submissions after server data is refreshed
-          setPendingSuccessfulSubmissions([]);
-        } catch (err) {
-          console.error('Failed to refresh budget data:', err);
-          // Don't show error to user as this is background refresh
+        if (response.data.success) {
+            setSubmissions(prev => prev.map(s => s.id === submissionId ? { ...s, status: 'success' } : s));
+            setSuccessMessage('Receipt submitted successfully!');
+            setPendingSuccessfulSubmissions(prev => [...prev, {
+              budgetId: selectedBudget,
+              category: selectedCategory,
+              amount: parseFloat(currentAmount) / 100
+            }]);
+            // Remove the submission after a short delay
+            setTimeout(() => {
+              setSubmissions(prev => prev.filter(s => s.id !== submissionId));
+            }, 3000);
+            // Form fields already reset above, no need to reset again
+        } else {
+            throw new Error(response.data.error || 'Unknown error occurred');
         }
-        
-        // Remove success submission after 4 seconds
+    } catch (err: any) {
+        const errorMessage = err.response?.data?.error || err.message || 'Failed to submit receipt.';
+        setError(errorMessage);
+        setSubmissions(prev => prev.map(s => s.id === submissionId ? { ...s, status: 'error' } : s));
+        // Remove the error submission after a short delay
         setTimeout(() => {
-          setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
-        }, 4000);
-      } else {
-        // Update submission status to error
-        setSubmissions(prev => prev.map(sub => 
-          sub.id === submissionId ? { ...sub, status: 'error' } : sub
-        ));
-        
-        // Remove error submission after 6 seconds
-        setTimeout(() => {
-          setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
-        }, 6000);
-      }
-    } catch (error: any) {
-      console.error('Submit error details:', {
-        message: error.message,
-        code: error.code,
-        response: error.response?.data,
-        status: error.response?.status,
-        headers: error.response?.headers
-      });
-      
-      // Update submission status to error
-      setSubmissions(prev => prev.map(sub => 
-        sub.id === submissionId ? { ...sub, status: 'error' } : sub
-      ));
-      
-      // Remove error submission after 6 seconds
-      setTimeout(() => {
-        setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
-      }, 6000);
+          setSubmissions(prev => prev.filter(s => s.id !== submissionId));
+        }, 5000);
     }
   };
 
@@ -447,6 +478,16 @@ export const ReceiptForm = () => {
       fetchVendorSuggestions();
     }
   }, [user]);
+
+  // Clear success message after 5 seconds
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => {
+        setSuccessMessage(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   // Filter vendor suggestions based on current input
   const getFilteredVendorSuggestions = (inputValue: string) => {
@@ -547,25 +588,71 @@ export const ReceiptForm = () => {
         <form onSubmit={handleSubmit}>
           <Stack spacing={2.5}>
             <Grid container spacing={0} sx={{ m: 0, width: '100%' }}>
-              <Grid item xs={6} sx={{ m: 0, p: 0, pr: 1 }}>
+              <Grid item xs={6} sm={6}>
                 <FormControl fullWidth>
-                  <InputLabel shrink>Budget</InputLabel>
+                  <InputLabel id="budget-select-label">Budget</InputLabel>
                   <Select
+                    labelId="budget-select-label"
                     value={selectedBudget}
-                    onChange={(e) => setSelectedBudget(e.target.value)}
                     label="Budget"
+                    onChange={(e) => setSelectedBudget(e.target.value)}
+                    renderValue={(selectedValue) => {
+                      const selectedOption = finalBudgetOptions.find((b: { budgetId: string; displayName: string; }) => b.budgetId === selectedValue);
+                      return selectedOption ? selectedOption.displayName : '';
+                    }}
                   >
-                    {availableBudgetNames.length > 0 ? (
-                      availableBudgetNames.map((budgetName: string) => (
-                        <MenuItem key={budgetName} value={budgetName}>
-                          {budgetName}
-                        </MenuItem>
-                      ))
-                    ) : (
-                      <MenuItem disabled>Loading budgets...</MenuItem>
-                    )}
+                    {finalBudgetOptions.map((option: {budgetId: string, displayName: string, region?: string, subRegion?: string}) => (
+                      <MenuItem key={option.budgetId} value={option.budgetId}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                          <Typography variant="body1">
+                            {option.displayName}
+                          </Typography>
+                          <Stack direction="column" alignItems="flex-end">
+                            {option.region && (
+                              <Chip
+                                label={option.region}
+                                size="small"
+                                sx={{ 
+                                  height: 'auto', 
+                                  fontSize: '0.6rem', 
+                                  lineHeight: 1.2,
+                                  backgroundColor: getColorFromString(option.region),
+                                  color: 'white',
+                                }}
+                              />
+                            )}
+                            {option.subRegion && option.region !== option.subRegion && (
+                              <Chip
+                                label={option.subRegion}
+                                size="small"
+                                sx={{ 
+                                  height: 'auto', 
+                                  fontSize: '0.6rem', 
+                                  lineHeight: 1.2, 
+                                  mt: 0.3,
+                                  backgroundColor: getColorFromString(option.subRegion),
+                                  color: 'white',
+                                }}
+                              />
+                            )}
+                          </Stack>
+                        </Box>
+                      </MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
+                {(() => {
+                  const selectedOption = finalBudgetOptions.find((b: { budgetId: string; region?: string; subRegion?: string; }) => b.budgetId === selectedBudget);
+                  if (selectedOption) {
+                    return (
+                      <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                        {selectedOption.region && <Chip label={selectedOption.region} size="small" sx={{backgroundColor: getColorFromString(selectedOption.region), color: 'white'}} />}
+                        {selectedOption.subRegion && selectedOption.region !== selectedOption.subRegion && <Chip label={selectedOption.subRegion} size="small" sx={{backgroundColor: getColorFromString(selectedOption.subRegion), color: 'white'}} />}
+                      </Stack>
+                    );
+                  }
+                  return null;
+                })()}
               </Grid>
               <Grid item xs={6} sx={{ m: 0, p: 0, pl: 1, position: 'relative' }}>
                 <FormControl fullWidth>
@@ -774,10 +861,9 @@ export const ReceiptForm = () => {
                   type="submit"
                   variant="contained"
                   color="success"
-                  disabled={loading}
                   fullWidth
                 >
-                  {loading ? <CircularProgress size={24} /> : 'Submit Receipt'}
+                  Submit Receipt
                 </Button>
               </Box>
             )}

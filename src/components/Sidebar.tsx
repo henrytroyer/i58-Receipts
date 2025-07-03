@@ -7,6 +7,8 @@ import {
   BugReport as TestIcon,
   Edit as EditIcon,
   AccountCircle as AccountIcon,
+  Settings as SettingsIcon,
+  AccountBalance as PettyCashIcon,
 } from '@mui/icons-material';
 import styles from '../styles/Sidebar.module.css';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -175,6 +177,62 @@ const Sidebar = () => {
                 </ListItemIcon>
                 <ListItemText 
                   primary="Edit Previous Receipts" 
+                  sx={{ 
+                    '& .MuiListItemText-primary': { 
+                      color: 'rgba(0, 0, 0, 0.87)',
+                      fontWeight: 500
+                    } 
+                  }} 
+                />
+              </ListItem>
+            </NavLink>
+          </li>
+        )}
+        {user && (
+          <li>
+            <NavLink to="/settings" className={({isActive}) => isActive ? styles.active : ''}>
+              <ListItem component="div" sx={{
+                borderRadius: 1,
+                mx: 1,
+                mb: 0.5,
+                background: 'none',
+                '&:hover': {
+                  bgcolor: 'transparent'
+                }
+              }}>
+                <ListItemIcon sx={{ color: 'rgba(0, 0, 0, 0.7)', minWidth: 40 }}>
+                  <SettingsIcon />
+                </ListItemIcon>
+                <ListItemText 
+                  primary="Settings" 
+                  sx={{ 
+                    '& .MuiListItemText-primary': { 
+                      color: 'rgba(0, 0, 0, 0.87)',
+                      fontWeight: 500
+                    } 
+                  }} 
+                />
+              </ListItem>
+            </NavLink>
+          </li>
+        )}
+        {hasAdminAccess && (
+          <li>
+            <NavLink to="/petty-cash" className={({isActive}) => isActive ? styles.active : ''}>
+              <ListItem component="div" sx={{
+                borderRadius: 1,
+                mx: 1,
+                mb: 0.5,
+                background: 'none',
+                '&:hover': {
+                  bgcolor: 'transparent'
+                }
+              }}>
+                <ListItemIcon sx={{ color: 'rgba(0, 0, 0, 0.7)', minWidth: 40 }}>
+                  <PettyCashIcon />
+                </ListItemIcon>
+                <ListItemText 
+                  primary="Petty Cash" 
                   sx={{ 
                     '& .MuiListItemText-primary': { 
                       color: 'rgba(0, 0, 0, 0.87)',

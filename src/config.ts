@@ -1,7 +1,11 @@
 import axios from 'axios';
 
-// TODO: Update this URL with the new deployment URL from the correct Google Apps Script project
-export const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbx49S2FIU4lgI2WEo811kLAesOQJ18zBBds0PuHzkOx9FXv1mA9KRFTg_lqpgcit_UT/exec';
+// The base URL for the Google Apps Script is loaded from environment variables
+export const API_BASE_URL = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL;
+
+if (!API_BASE_URL) {
+  console.error("VITE_GOOGLE_APPS_SCRIPT_URL is not defined. Please check your .env file.");
+}
 
 // Create a shared axios instance with the correct configuration
 export const api = axios.create({

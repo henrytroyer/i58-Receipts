@@ -23,6 +23,9 @@ const theme = createTheme({
   },
 })
 
+// Log the environment variable to verify it's loaded
+console.log("VITE_GOOGLE_APPS_SCRIPT_URL at startup:", import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL);
+
 root.render(
   <ThemeProvider theme={theme}>
     <CssBaseline />
